@@ -26,15 +26,16 @@ Git Pro drives the `git` you already have installed. Pushes and fetches use your
 10. [Stashes](#stashes)
 11. [Merge editor](#merge-editor)
 12. [Branches, remotes and tags](#branches-remotes-and-tags)
-13. [Cherry-pick, revert, reset](#cherry-pick-revert-reset)
-14. [Reflog, backups and undo](#reflog-backups-and-undo)
-15. [Syntax highlighting and view settings](#syntax-highlighting-and-view-settings)
-16. [Command log](#command-log)
-17. [Menu bar and keyboard shortcuts](#menu-bar-and-keyboard-shortcuts)
-18. [Where Git Pro stores things](#where-git-pro-stores-things)
-19. [Troubleshooting](#troubleshooting)
-20. [Limits and known gaps](#limits-and-known-gaps)
-21. [Development](#development)
+13. [Merging and rebasing branches](#merging-and-rebasing-branches)
+14. [Cherry-pick, revert, reset](#cherry-pick-revert-reset)
+15. [Reflog, backups and undo](#reflog-backups-and-undo)
+16. [Syntax highlighting and view settings](#syntax-highlighting-and-view-settings)
+17. [Command log](#command-log)
+18. [Menu bar and keyboard shortcuts](#menu-bar-and-keyboard-shortcuts)
+19. [Where Git Pro stores things](#where-git-pro-stores-things)
+20. [Troubleshooting](#troubleshooting)
+21. [Limits and known gaps](#limits-and-known-gaps)
+22. [Development](#development)
 
 ---
 
@@ -440,16 +441,36 @@ In **preview** mode (from Apply preview), it is read-only.
 
 Every sidebar item has a right-click menu.
 
-| Item                                  | Actions                                                                                                                                                                       |
-| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Branch** (double-click = check out) | Check out · Push to… · Edit history… · New branch from here… · Rename… · Set upstream… · Copy name · Delete… (backed up first; asks before force-deleting an unmerged branch) |
-| **Remote** (+ in the header adds one) | Fetch · Edit URL… · Copy URL · Remove remote… (only removes it locally)                                                                                                       |
-| **Remote branch**                     | Check out as local branch… · New branch from here… · Push something to this branch… · Edit history… · Copy name · Delete on _remote_…                                         |
-| **Tag**                               | Show in graph · New branch from tag… · Push to _remote_ · Copy name · Delete local tag… · Delete on _remote_…                                                                 |
+| Item                                  | Actions                                                                                                                                                                                          |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Branch** (double-click = check out) | Check out · Push to… · Edit history… · Merge… · Rebase… · New branch from here… · Rename… · Set upstream… · Copy name · Delete… (backed up first; asks before force-deleting an unmerged branch) |
+| **Remote** (+ in the header adds one) | Fetch · Edit URL… · Copy URL · Remove remote… (only removes it locally)                                                                                                                          |
+| **Remote branch**                     | Check out as local branch… · New branch from here… · Push something to this branch… · Edit history… · Copy name · Delete on _remote_…                                                            |
+| **Tag**                               | Show in graph · New branch from tag… · Push to _remote_ · Copy name · Delete local tag… · Delete on _remote_…                                                                                    |
 
 - Branch rows show ↑ahead ↓behind their upstream, or `gone` if the upstream was deleted.
 - **Tag here…** on a commit creates a lightweight or **annotated** tag; annotated tags can have a **custom tagger date**.
 - Toolbar: **Fetch** fetches all remotes or one, pruning deleted branches. **Pull** offers fast-forward only, merge or rebase.
+
+## Merging and rebasing branches
+
+Right-click any branch, remote branch, tag or commit and choose **Merge _x_ into _current_…** or **Rebase _current_ onto _x_…**. The current branch's own menu has **Merge into _branch_…** and **Rebase _branch_ onto…**, and the **Branch** menu has both too.
+
+**Merge**
+
+- **Merge** is what to bring in (any branch, remote branch, tag or commit; names are suggested as you type). **Into** is the local branch that receives it.
+- **How:** **Fast-forward if possible** (git's default), **Always a merge commit** (`--no-ff`), **Fast-forward only**, or **Squash** (one new commit, not a merge).
+- The preview shows the commits and files that come in, and any conflicts. **Preview in merge editor** shows the conflicted result read-only.
+- **Result:** into the branch itself (a [backup](#reflog-backups-and-undo) of its old position is kept), or into a **new branch** made from it.
+- **Branches that are not checked out** are merged without touching your working tree, so you can keep working. A merge like that must be conflict-free. If it is not, Git Pro checks the branch out first, and the conflicts open in the merge editor as usual.
+- The **Command** box shows what will run.
+
+**Rebase onto**
+
+- Replays a branch's own commits on top of another branch, tag or commit. The preview lists the commits to replay.
+- **Result:** a **new branch** by default (the original stays as it was), or **rewrite the branch in place** (a backup is kept; pushing it then needs a force push).
+- **Autostash** puts uncommitted changes aside during the rebase. **Keep merge commits** (`--rebase-merges`) appears when the branch has merges.
+- Conflicts stop the rebase with the usual banner: resolve the files in the merge editor, then **Continue**, **Skip** or **Abort**. The rebased branch is checked out afterwards.
 
 ## Cherry-pick, revert, reset
 

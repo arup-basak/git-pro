@@ -8,6 +8,7 @@ import * as branches from './git/branches'
 import * as commits from './git/commits'
 import * as history from './git/history'
 import * as hunks from './git/hunks'
+import * as integrate from './git/integrate'
 import * as log from './git/log'
 import * as merge from './git/merge'
 import * as op from './git/opstate'
@@ -155,6 +156,12 @@ const handlers: Handlers = {
   'branch.delete': async (repoId, name, force) => branches.deleteBranch(repo(repoId), name, force),
   'branch.setUpstream': async (repoId, name, upstream) =>
     branches.setUpstream(repo(repoId), name, upstream),
+  'branch.mergePreview': async (repoId, source, target) =>
+    integrate.mergePreview(repo(repoId), source, target),
+  'branch.merge': async (repoId, req) => integrate.mergeBranch(repo(repoId), req),
+  'branch.rebasePreview': async (repoId, branch, onto) =>
+    integrate.rebasePreview(repo(repoId), branch, onto),
+  'branch.rebaseOnto': async (repoId, req) => integrate.rebaseOnto(repo(repoId), req),
 
   'remote.fetch': async (repoId, remote, prune) =>
     remotes.fetch(repo(repoId), remote, prune, progress(repoId)),

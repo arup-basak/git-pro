@@ -27,7 +27,12 @@ import type {
   MergeResolution,
   GitDate,
   LineAction,
-  LineSelection
+  LineSelection,
+  BranchMergeRequest,
+  IntegrateResult,
+  MergePreview,
+  RebaseOntoRequest,
+  RebasePreview
 } from './types'
 import type { MenuState } from './menu'
 
@@ -88,6 +93,10 @@ export interface GitProApi {
   'branch.rename'(repoId: string, oldName: string, newName: string): Promise<void>
   'branch.delete'(repoId: string, name: string, force: boolean): Promise<string | null>
   'branch.setUpstream'(repoId: string, name: string, upstream: string | null): Promise<void>
+  'branch.mergePreview'(repoId: string, source: string, target: string): Promise<MergePreview>
+  'branch.merge'(repoId: string, req: BranchMergeRequest): Promise<IntegrateResult>
+  'branch.rebasePreview'(repoId: string, branch: string, onto: string): Promise<RebasePreview>
+  'branch.rebaseOnto'(repoId: string, req: RebaseOntoRequest): Promise<IntegrateResult>
 
   'remote.fetch'(repoId: string, remote: string | null, prune: boolean): Promise<void>
   'remote.pull'(repoId: string, mode: 'ff-only' | 'merge' | 'rebase'): Promise<void>

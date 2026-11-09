@@ -39,6 +39,19 @@ export function commitMenu(
       onSelect: () => void cherryPick(c.sha)
     },
     { label: 'Revert…', onSelect: () => void revertCommit(c.sha) },
+    ...(currentBranch
+      ? [
+          {
+            label: `Merge this commit into ${currentBranch}…`,
+            onSelect: () =>
+              ui.openIntegrate({ kind: 'merge', source: c.sha, target: currentBranch })
+          },
+          {
+            label: `Rebase ${currentBranch} onto this commit…`,
+            onSelect: () => ui.openIntegrate({ kind: 'rebase', branch: currentBranch, onto: c.sha })
+          }
+        ]
+      : []),
     {
       label: `Reset ${currentBranch ?? 'HEAD'} to here…`,
       danger: true,

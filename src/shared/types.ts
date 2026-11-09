@@ -397,3 +397,82 @@ export type AppEvent =
   | { type: 'command'; entry: CommandLogEntry }
   | { type: 'progress'; repoId: string; line: string }
   | { type: 'menu'; command: MenuCommand; arg?: string }
+
+/* ---------------- merge a branch / rebase onto ---------------- */
+
+export type MergeMode = 'ff' | 'no-ff' | 'ff-only' | 'squash'
+
+/** Where the result goes: move the target branch itself, or a new branch from it. */
+export type IntegrateOutput = { mode: 'in-place' } | { mode: 'new-branch'; name: string }
+
+export interface MergePreview {
+  source: string
+  target: string
+  sourceSha: string
+  targetSha: string
+  /** The source is already contained in the target. */
+  upToDate: boolean
+  /** The target is an ancestor of the source (a fast-forward is possible). */
+  fastForward: boolean
+  /** Commits in the source that the target does not have. */
+  ahead: number
+  clean: boolean
+  conflicted: string[]
+  /** Files the merge changes in the target, with their status letter. */
+  files: Array<{ path: string; status: string }>
+  /** The target branch is the one checked out. */
+  targetCheckedOut: boolean
+  /** Trees for the read-only merge-editor preview of conflicts. */
+  trees: MergeTrees
+}
+
+export interface BranchMergeRequest {
+  /** What to merge: a branch, remote branch, tag or commit. */
+  source: string
+  /** Local branch that receives the merge. */
+  target: string
+  mode: MergeMode
+  /** Commit message for a merge or squash commit (a default is used when empty). */
+  message?: string
+  output: IntegrateOutput
+  /**
+   * Check the result branch out and merge there, so conflicts can be resolved in the merge
+   * editor. Without it, a branch that is not checked out is merged without touching the
+   * working tree, which only works when the merge is clean.
+   */
+  checkout: boolean
+}
+
+export interface RebasePreview {
+  branch: string
+  onto: string
+  branchSha: string
+  ontoSha: string
+  /** Commits that will be replayed, oldest first. */
+  commits: Array<{ sha: string; subject: string }>
+  /** The branch already contains `onto`. */
+  upToDate: boolean
+  hasMerges: boolean
+  checkedOut: boolean
+}
+
+export interface RebaseOntoRequest {
+  /** Local branch whose commits are replayed. */
+  branch: string
+  /** New base: a branch, remote branch, tag or commit. */
+  onto: string
+  output: IntegrateOutput
+  autostash: boolean
+  /** Keep merge commits (`--rebase-merges`) instead of flattening them. */
+  keepMerges: boolean
+}
+
+export interface IntegrateResult {
+  status: 'done' | 'conflict' | 'up-to-date'
+  /** Branch that received the result. */
+  branch: string
+  oldTip: string | null
+  newTip: string | null
+  backupRef: string | null
+  message: string
+}

@@ -314,3 +314,38 @@ test('stages one hunk, stashes a single line and applies it on top of new edits'
   expect(rowsFile()).toContain('ROW 2\n')
   expect(rowsFile()).toContain('ROW 10\n')
 })
+
+test('merges a branch and rebases onto another from the sidebar menu', async () => {
+  git(repoDir, 'add', '-A')
+  git(repoDir, 'commit', '-q', '-m', 'wip before merging')
+  git(repoDir, 'switch', '-q', '-c', 'topic')
+  commit('topic.txt', 'topic\n', 'topic work', 1_700_050_000)
+  git(repoDir, 'switch', '-q', 'main')
+  commit('main-side.txt', 'main\n', 'main side work', 1_700_050_100)
+
+  await page.locator('aside').getByText('topic', { exact: true }).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Merge topic into main…' }).click()
+  const dlg = page.getByRole('dialog')
+  await expect(dlg.getByText(/merges cleanly/)).toBeVisible()
+  await shot('15-merge-dialog')
+  await dlg.getByRole('button', { name: /^Merge topic into main/ }).click()
+  await expect(page.getByText('Merged topic into main')).toBeVisible()
+  expect(git(repoDir, 'log', '-1', '--format=%s', 'main')).toBe("Merge branch 'topic' into main")
+  expect(git(repoDir, 'for-each-ref', '--format=%(refname)', 'refs/git-pro/backups')).toContain(
+    '-merge/main'
+  )
+
+  // A side branch made from an older commit, then main rebased onto it as a new branch.
+  git(repoDir, 'switch', '-q', '-c', 'side', 'main~3')
+  commit('side.txt', 'side\n', 'side work', 1_700_050_200)
+  git(repoDir, 'switch', '-q', 'main')
+  await page.locator('aside').getByText('side', { exact: true }).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Rebase main onto side…' }).click()
+  await expect(dlg.getByText(/will be replayed onto side/)).toBeVisible()
+  await shot('16-rebase-dialog')
+  await dlg.getByRole('button', { name: 'Rebase main-rebased onto side' }).click()
+  await expect(page.getByText('Rebased main-rebased onto side')).toBeVisible()
+  expect(git(repoDir, 'log', '--format=%s', 'main-rebased')).toContain('side work')
+  expect(git(repoDir, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('main-rebased')
+  git(repoDir, 'switch', '-q', 'main')
+})

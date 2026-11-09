@@ -26,6 +26,11 @@ export interface StashDialogRequest {
   selections?: LineSelection[]
 }
 
+/** Opens the Merge or Rebase-onto dialog, optionally prefilled. */
+export type IntegrateRequest =
+  | { kind: 'merge'; source?: string; target?: string }
+  | { kind: 'rebase'; branch?: string; onto?: string }
+
 export interface HistoryRequest {
   tip: string
   /** Exclusive base; null = from the root commit. */
@@ -43,6 +48,7 @@ interface UiState {
   graphRef: string | null
   history: HistoryRequest | null
   push: Partial<PushSpec> | null
+  integrate: IntegrateRequest | null
   logOpen: boolean
   stashSel: StashTarget | null
   stashDialog: StashDialogRequest | null
@@ -58,6 +64,8 @@ interface UiState {
   openHistory(req: Omit<HistoryRequest, 'nonce'>): void
   openPush(prefill: Partial<PushSpec>): void
   closePush(): void
+  openIntegrate(req: IntegrateRequest): void
+  closeIntegrate(): void
   toggleLog(open?: boolean): void
   selectStash(t: StashTarget | null): void
   openStashDialog(opts: StashDialogRequest): void
@@ -78,6 +86,7 @@ export const useUi = create<UiState>((set) => ({
   graphRef: null,
   history: null,
   push: null,
+  integrate: null,
   logOpen: false,
   stashSel: null,
   stashDialog: null,
@@ -94,6 +103,8 @@ export const useUi = create<UiState>((set) => ({
       history: null,
       stashSel: null,
       merge: null,
+      integrate: null,
+      push: null,
       view: 'graph'
     }),
   setView: (view) => set({ view }),
@@ -102,6 +113,8 @@ export const useUi = create<UiState>((set) => ({
   openHistory: (req) => set({ history: { ...req, nonce: Date.now() }, view: 'history' }),
   openPush: (push) => set({ push }),
   closePush: () => set({ push: null }),
+  openIntegrate: (integrate) => set({ integrate }),
+  closeIntegrate: () => set({ integrate: null }),
   toggleLog: (open) => set((s) => ({ logOpen: open ?? !s.logOpen })),
   selectStash: (stashSel) => set({ stashSel }),
   openStashDialog: (stashDialog) => set({ stashDialog }),

@@ -9,6 +9,7 @@ import { Sidebar } from './components/layout/Sidebar'
 import { Toolbar } from './components/layout/Toolbar'
 import { Welcome } from './components/layout/Welcome'
 import { MergeEditorView } from './components/merge/MergeEditor'
+import { IntegrateDialog } from './components/dialogs/IntegrateDialog'
 import { PushDialog } from './components/push/PushDialog'
 import { StashSaveDialog } from './components/stash/StashSaveDialog'
 import { StashesView } from './components/stash/StashesView'
@@ -52,6 +53,7 @@ function Workspace() {
       <CommandLog />
       <StatusBar />
       <PushDialog />
+      <IntegrateDialog />
       <StashSaveDialog />
     </div>
   )

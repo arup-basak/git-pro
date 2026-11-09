@@ -340,7 +340,9 @@ function StashDetail({ sel, groups }: { sel: Sel; groups: string[] }) {
                     ? 'staged changes'
                     : app.scope === 'paths'
                       ? 'selected files'
-                      : 'all changes'}
+                      : app.scope === 'lines'
+                        ? 'selected lines'
+                        : 'all changes'}
                   {app.includeUntracked ? ' + untracked' : ''}
                 </span>
               )}

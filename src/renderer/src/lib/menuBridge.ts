@@ -275,6 +275,12 @@ export async function runMenuCommand(command: MenuCommand, arg?: string): Promis
     case 'branch.checkout':
       if (arg && arg !== branch) await checkoutBranch(arg)
       return
+    case 'branch.merge':
+      if (branch) ui.openIntegrate({ kind: 'merge', target: branch })
+      return
+    case 'branch.rebase':
+      if (branch) ui.openIntegrate({ kind: 'rebase', branch })
+      return
     case 'branch.rename':
       if (branch) await renameBranch(branch)
       return

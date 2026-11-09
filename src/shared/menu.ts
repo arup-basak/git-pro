@@ -40,6 +40,8 @@ export type MenuCommand =
   | 'branch.new'
   | 'branch.checkout'
   | 'branch.rename'
+  | 'branch.merge'
+  | 'branch.rebase'
   | 'branch.upstream'
   | 'branch.push'
   | 'branch.show'

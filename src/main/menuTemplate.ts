@@ -220,6 +220,13 @@ export function buildMenuTemplate(s: MenuState, env: MenuEnv): Item[] {
           .map((b) => cmd('branch.checkout', b, { arg: b, type: 'radio', checked: b === branch }))
       },
       SEP,
+      cmd('branch.merge', branch ? `Merge into ${quote(branch)}…` : 'Merge…', {
+        enabled: head && !!branch && !busy
+      }),
+      cmd('branch.rebase', branch ? `Rebase ${quote(branch)} onto…` : 'Rebase onto…', {
+        enabled: head && !!branch && !busy
+      }),
+      SEP,
       cmd('branch.rename', branch ? `Rename ${quote(branch)}…` : 'Rename Branch…', {
         enabled: repo && !!branch
       }),

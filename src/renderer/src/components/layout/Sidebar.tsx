@@ -153,6 +153,23 @@ export function Sidebar() {
     ui.setView('graph')
   }
 
+  const cur = data?.currentBranch ?? null
+  /** "Merge X into <current>…" / "Rebase <current> onto X…" for any ref other than the current branch. */
+  const integrateEntries = (ref: string): MenuEntry[] =>
+    cur && ref !== cur
+      ? [
+          {
+            label: `Merge ${ref} into ${cur}…`,
+            onSelect: () => ui.openIntegrate({ kind: 'merge', source: ref, target: cur })
+          },
+          {
+            label: `Rebase ${cur} onto ${ref}…`,
+            onSelect: () => ui.openIntegrate({ kind: 'rebase', branch: cur, onto: ref })
+          },
+          { separator: true }
+        ]
+      : []
+
   const branchMenu = (
     name: string,
     sha: string,
@@ -173,6 +190,19 @@ export function Sidebar() {
     },
     { label: 'Edit history…', onSelect: () => ui.openHistory({ tip: name, base: { count: 10 } }) },
     { separator: true },
+    ...(current
+      ? [
+          {
+            label: `Merge into ${name}…`,
+            onSelect: () => ui.openIntegrate({ kind: 'merge', target: name })
+          },
+          {
+            label: `Rebase ${name} onto…`,
+            onSelect: () => ui.openIntegrate({ kind: 'rebase', branch: name })
+          },
+          { separator: true }
+        ]
+      : integrateEntries(name)),
     { label: 'New branch from here…', onSelect: () => void createBranchAt(sha, name) },
     { label: 'Rename…', onSelect: () => void renameBranch(name) },
     { label: 'Set upstream…', onSelect: () => void setUpstream(name, remoteShorts, upstream) },
@@ -298,6 +328,8 @@ export function Sidebar() {
                         label: 'Check out as local branch…',
                         onSelect: () => void checkoutRemoteBranch(rb.short, rb.name)
                       },
+                      { separator: true },
+                      ...integrateEntries(rb.short),
                       {
                         label: 'New branch from here…',
                         onSelect: () => void createBranchAt(rb.sha, rb.short)
@@ -343,6 +375,7 @@ export function Sidebar() {
               { label: 'Show in graph', onSelect: () => showRef(`refs/tags/${t.name}`, t.sha) },
               { label: 'New branch from tag…', onSelect: () => void createBranchAt(t.sha, t.name) },
               { separator: true },
+              ...integrateEntries(t.name),
               ...remotes.map((r) => ({
                 label: `Push to ${r.name}`,
                 onSelect: () => void pushTag(r.name, t.name)
