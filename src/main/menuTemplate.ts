@@ -150,6 +150,7 @@ export function buildMenuTemplate(s: MenuState, env: MenuEnv): Item[] {
       cmd('view.syntax', 'Syntax Highlighting', { type: 'checkbox', checked: s.syntax }),
       cmd('view.wordDiff', 'Highlight Changed Words', { type: 'checkbox', checked: s.wordDiff }),
       cmd('view.wrap', 'Wrap Long Lines in Diffs', { type: 'checkbox', checked: s.wrap }),
+      cmd('view.splitDiff', 'Side-by-Side Diffs', { type: 'checkbox', checked: s.splitDiff }),
       {
         label: 'Syntax Theme',
         id: 'view.themes',

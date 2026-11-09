@@ -1,8 +1,8 @@
 import { memo, useMemo } from 'react'
 import { cx } from '../../lib/format'
 import { langFromPath, useTokenizer, type ThemedToken } from '../../lib/highlight'
-import { parsePatch, type DiffFile } from '../../lib/patch'
-import { useViewSettings } from '../../lib/settings'
+import { pairRuns, parsePatch, splitRows, type DiffFile, type DiffLine } from '../../lib/patch'
+import { useViewSettings, type DiffLayout } from '../../lib/settings'
 import { wordDiff, type Range } from '../../lib/wordDiff'
 import { TokenLine } from '../code/Code'
 import { Empty, Spinner } from '../ui'
@@ -51,24 +51,11 @@ function useDecorations(file: DiffFile, wordMarks: boolean): Decorated {
     }
 
     if (wordMarks) {
-      // Pair each run of removed lines with the run of added lines right after it.
-      let k = 0
-      while (k < file.lines.length) {
-        if (file.lines[k].kind !== 'del') {
-          k++
-          continue
-        }
-        const delStart = k
-        while (k < file.lines.length && file.lines[k].kind === 'del') k++
-        const addStart = k
-        while (k < file.lines.length && file.lines[k].kind === 'add') k++
-        const pairs = Math.min(addStart - delStart, k - addStart)
-        for (let p = 0; p < pairs; p++) {
-          const d = wordDiff(file.lines[delStart + p].text, file.lines[addStart + p].text)
-          if (d) {
-            marks[delStart + p] = d.a
-            marks[addStart + p] = d.b
-          }
+      for (const [d, a] of pairRuns(file.lines)) {
+        const w = wordDiff(file.lines[d].text, file.lines[a].text)
+        if (w) {
+          marks[d] = w.a
+          marks[a] = w.b
         }
       }
     }
@@ -76,85 +63,210 @@ function useDecorations(file: DiffFile, wordMarks: boolean): Decorated {
   }, [file, tokenize, wordMarks])
 }
 
+const ROW_TINT: Partial<Record<DiffLine['kind'], string>> = {
+  add: 'bg-ok/[0.08]',
+  del: 'bg-bad/[0.08]',
+  hunk: 'bg-accent/[0.07] text-accent/80',
+  meta: 'text-faint'
+}
+
+/** The text cell of one diff line (syntax tokens + changed-word marks). */
+function LineText({
+  line,
+  tokens,
+  marks,
+  wrap,
+  className
+}: {
+  line: DiffLine
+  tokens: ThemedToken[] | null
+  marks: Range[] | null
+  wrap: boolean
+  className?: string
+}) {
+  const code = line.kind === 'add' || line.kind === 'del' || line.kind === 'ctx'
+  return (
+    <td
+      className={cx(
+        'pr-4 align-top select-text',
+        wrap ? 'break-all whitespace-pre-wrap' : 'whitespace-pre',
+        className
+      )}
+    >
+      {code ? (
+        <TokenLine
+          text={line.text}
+          tokens={tokens}
+          marks={marks}
+          markClass={line.kind === 'add' ? 'rounded-[2px] bg-ok/30' : 'rounded-[2px] bg-bad/30'}
+        />
+      ) : (
+        line.text
+      )}
+      {line.text === '' ? ' ' : null}
+    </td>
+  )
+}
+
+function Sign({ kind, className }: { kind: DiffLine['kind']; className?: string }) {
+  return (
+    <td
+      className={cx(
+        'w-4 text-center align-top select-none',
+        className,
+        kind === 'add' && 'text-ok',
+        kind === 'del' && 'text-bad'
+      )}
+    >
+      {kind === 'add' ? '+' : kind === 'del' ? '−' : ''}
+    </td>
+  )
+}
+
+const NUM = 'w-10 pr-2 text-right align-top text-faint/70 select-none'
+
+function UnifiedBody({ file, deco, wrap }: { file: DiffFile; deco: Decorated; wrap: boolean }) {
+  return (
+    <tbody>
+      {file.lines.map((l, j) => (
+        <tr key={j} className={ROW_TINT[l.kind]}>
+          <td className={NUM}>{l.oldNo ?? ''}</td>
+          <td className={NUM}>{l.newNo ?? ''}</td>
+          <Sign kind={l.kind} />
+          <LineText line={l} tokens={deco.tokens[j]} marks={deco.marks[j]} wrap={wrap} />
+        </tr>
+      ))}
+    </tbody>
+  )
+}
+
+/** One side (number, sign, text) of a side-by-side row; empty when the side has no line. */
+function Half({
+  file,
+  deco,
+  j,
+  side,
+  wrap
+}: {
+  file: DiffFile
+  deco: Decorated
+  j: number | undefined
+  side: 'left' | 'right'
+  wrap: boolean
+}) {
+  if (j === undefined) {
+    const empty = 'bg-panel-2/60'
+    return (
+      <>
+        <td className={cx(NUM, empty, side === 'right' && 'border-l border-line')} />
+        <td className={empty} />
+        <td className={empty} />
+      </>
+    )
+  }
+  const l = file.lines[j]
+  const tint = l.kind === 'add' ? 'bg-ok/[0.08]' : l.kind === 'del' ? 'bg-bad/[0.08]' : ''
+  return (
+    <>
+      <td className={cx(NUM, tint, side === 'right' && 'border-l border-line')}>
+        {side === 'left' ? (l.oldNo ?? '') : (l.newNo ?? '')}
+      </td>
+      <Sign kind={l.kind} className={tint} />
+      <LineText
+        line={l}
+        tokens={deco.tokens[j]}
+        marks={deco.marks[j]}
+        wrap={wrap}
+        className={tint}
+      />
+    </>
+  )
+}
+
+function SplitBody({ file, deco, wrap }: { file: DiffFile; deco: Decorated; wrap: boolean }) {
+  const rows = useMemo(() => splitRows(file.lines), [file])
+  return (
+    <tbody>
+      {rows.map((r, i) =>
+        r.full !== undefined ? (
+          <tr key={i} className={ROW_TINT[file.lines[r.full].kind]}>
+            <td colSpan={6} className="px-3 whitespace-pre-wrap select-text">
+              {file.lines[r.full].text}
+            </td>
+          </tr>
+        ) : (
+          <tr key={i}>
+            <Half file={file} deco={deco} j={r.left} side="left" wrap={wrap} />
+            <Half file={file} deco={deco} j={r.right} side="right" wrap={wrap} />
+          </tr>
+        )
+      )}
+    </tbody>
+  )
+}
+
 const FileDiff = memo(function FileDiff({
   file,
   wrap,
-  wordMarks
+  wordMarks,
+  layout
 }: {
   file: DiffFile
   wrap: boolean
   wordMarks: boolean
+  layout: DiffLayout
 }) {
-  const { tokens, marks } = useDecorations(file, wordMarks)
+  const deco = useDecorations(file, wordMarks)
   const lang = langFromPath(file.path)
+  const split = layout === 'split'
   return (
-    <div className="border-b border-line">
+    <div className="border-b border-line" data-diff-layout={layout}>
       <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-panel-2 px-3 py-1.5">
         <span className="mono font-medium">{file.title}</span>
         {lang && <span className="rounded bg-line px-1.5 text-[10px] text-faint">{lang}</span>}
       </div>
       {file.binary && <div className="px-3 py-2 text-muted">Binary file</div>}
       <table
-        className={cx('mono border-collapse leading-[19px]', wrap ? 'w-full' : 'w-max min-w-full')}
+        className={cx(
+          'mono border-collapse leading-[19px]',
+          wrap ? 'w-full' : 'w-max min-w-full',
+          split && wrap && 'table-fixed'
+        )}
       >
-        <tbody>
-          {file.lines.map((l, j) => (
-            <tr
-              key={j}
-              className={cx(
-                l.kind === 'add' && 'bg-ok/[0.08]',
-                l.kind === 'del' && 'bg-bad/[0.08]',
-                l.kind === 'hunk' && 'bg-accent/[0.07] text-accent/80',
-                l.kind === 'meta' && 'text-faint'
-              )}
-            >
-              <td className="w-10 pr-2 text-right align-top text-faint/70 select-none">
-                {l.oldNo ?? ''}
-              </td>
-              <td className="w-10 pr-2 text-right align-top text-faint/70 select-none">
-                {l.newNo ?? ''}
-              </td>
-              <td
-                className={cx(
-                  'w-4 text-center align-top select-none',
-                  l.kind === 'add' && 'text-ok',
-                  l.kind === 'del' && 'text-bad'
-                )}
-              >
-                {l.kind === 'add' ? '+' : l.kind === 'del' ? '−' : ''}
-              </td>
-              <td
-                className={cx(
-                  'pr-4 select-text',
-                  wrap ? 'break-all whitespace-pre-wrap' : 'whitespace-pre'
-                )}
-              >
-                {l.kind === 'add' || l.kind === 'del' || l.kind === 'ctx' ? (
-                  <TokenLine
-                    text={l.text}
-                    tokens={tokens[j]}
-                    marks={marks[j]}
-                    markClass={
-                      l.kind === 'add' ? 'rounded-[2px] bg-ok/30' : 'rounded-[2px] bg-bad/30'
-                    }
-                  />
-                ) : (
-                  l.text
-                )}
-                {l.text === '' ? ' ' : null}
-              </td>
-            </tr>
-          ))}
-        </tbody>
+        {split && wrap && (
+          <colgroup>
+            <col className="w-10" />
+            <col className="w-4" />
+            <col />
+            <col className="w-10" />
+            <col className="w-4" />
+            <col />
+          </colgroup>
+        )}
+        {split ? (
+          <SplitBody file={file} deco={deco} wrap={wrap} />
+        ) : (
+          <UnifiedBody file={file} deco={deco} wrap={wrap} />
+        )}
       </table>
     </div>
   )
 })
 
-export function DiffView({ patch, loading }: { patch: string; loading?: boolean }) {
+export function DiffView({
+  patch,
+  loading,
+  layout
+}: {
+  patch: string
+  loading?: boolean
+  /** Overrides the View setting (e.g. to force a unified diff in a narrow pane). */
+  layout?: DiffLayout
+}) {
   const { files, truncated } = useMemo(() => parsePatch(patch), [patch])
   const wrap = useViewSettings((s) => s.wrap)
   const wordMarks = useViewSettings((s) => s.wordDiff)
+  const preferred = useViewSettings((s) => s.diffLayout)
   if (loading) {
     return (
       <Empty>
@@ -166,7 +278,13 @@ export function DiffView({ patch, loading }: { patch: string; loading?: boolean 
   return (
     <div className="h-full overflow-auto bg-bg">
       {files.map((f, i) => (
-        <FileDiff key={`${i}:${f.title}`} file={f} wrap={wrap} wordMarks={wordMarks} />
+        <FileDiff
+          key={`${i}:${f.title}`}
+          file={f}
+          wrap={wrap}
+          wordMarks={wordMarks}
+          layout={layout ?? preferred}
+        />
       ))}
       {truncated && <div className="p-3 text-warn">Diff truncated (too large to display)</div>}
     </div>

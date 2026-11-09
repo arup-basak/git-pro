@@ -62,6 +62,11 @@ export function ViewSettingsButton() {
               onChange={(v) => s.set({ wrap: v })}
               label="Wrap long lines in diffs"
             />
+            <Checkbox
+              checked={s.diffLayout === 'split'}
+              onChange={(v) => s.set({ diffLayout: v ? 'split' : 'unified' })}
+              label="Side-by-side diffs"
+            />
           </div>
           <div className="mt-3 overflow-x-auto rounded-md border border-line bg-bg">
             <CodeView text={SAMPLE} lang="typescript" lineNumbers />

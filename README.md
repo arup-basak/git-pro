@@ -500,6 +500,7 @@ Highlighting appears in every diff (commits, working tree, stashes, apply previe
 | Theme                            | GitHub Dark. Others: GitHub Dimmed, VS Code Dark+, One Dark Pro, Vitesse, Tokyo Night, Catppuccin Mocha, Nord, Rosé Pine, Kanagawa, Vesper, Minimal |
 | Highlight changed words in diffs | On                                                                                                                                                  |
 | Wrap long lines in diffs         | On                                                                                                                                                  |
+| Side-by-side diffs               | Off. When on, every diff shows the old version on the left and the new version on the right, with each changed line next to its replacement         |
 
 ## Command log
 

@@ -3,6 +3,8 @@ import { createJSONStorage, persist } from 'zustand/middleware'
 
 export { SYNTAX_THEMES } from '../../../shared/themes'
 
+export type DiffLayout = 'unified' | 'split'
+
 export interface ViewSettings {
   /** Syntax highlighting in diffs, the merge editor and code views. */
   syntax: boolean
@@ -12,6 +14,8 @@ export interface ViewSettings {
   wordDiff: boolean
   /** Soft-wrap long lines in diffs. */
   wrap: boolean
+  /** Show diffs as one column (unified) or old and new side by side (split). */
+  diffLayout: DiffLayout
   set(patch: Partial<Omit<ViewSettings, 'set'>>): void
 }
 
@@ -30,6 +34,7 @@ export const useViewSettings = create<ViewSettings>()(
       theme: 'github-dark-default',
       wordDiff: true,
       wrap: true,
+      diffLayout: 'unified',
       set: (patch) => set(patch)
     }),
     {
@@ -38,7 +43,13 @@ export const useViewSettings = create<ViewSettings>()(
       storage: createJSONStorage(() =>
         typeof window === 'undefined' ? memoryStorage : window.localStorage
       ),
-      partialize: ({ syntax, theme, wordDiff, wrap }) => ({ syntax, theme, wordDiff, wrap })
+      partialize: ({ syntax, theme, wordDiff, wrap, diffLayout }) => ({
+        syntax,
+        theme,
+        wordDiff,
+        wrap,
+        diffLayout
+      })
     }
   )
 )

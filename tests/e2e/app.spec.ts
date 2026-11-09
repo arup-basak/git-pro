@@ -248,3 +248,26 @@ test('resolves a TypeScript conflict with the highlighted merge editor', async (
     'export const greeting: string = "merged by hand"\n// a comment\n'
   )
 })
+
+test('shows diffs side by side when switched on in View', async () => {
+  writeFileSync(join(repoDir, 'd.txt'), 'delta second\nextra line\n')
+  await page.locator('aside').getByText('Changes', { exact: true }).first().click()
+  await page.getByText('d.txt').first().click()
+  await expect(page.locator('main [data-diff-layout="unified"]')).toBeVisible()
+
+  await page.getByRole('button', { name: 'View' }).click()
+  await page.getByText('Side-by-side diffs', { exact: true }).click()
+  await page.keyboard.press('Escape')
+  const split = page.locator('main [data-diff-layout="split"]')
+  await expect(split).toBeVisible()
+  // The changed line sits next to its replacement: old text left, new text right.
+  const row = split.locator('tr', { hasText: 'delta prime' })
+  await expect(row).toContainText('delta second')
+  await shot('12-side-by-side')
+
+  // Back to unified for the following tests.
+  await page.getByRole('button', { name: 'View' }).click()
+  await page.getByText('Side-by-side diffs', { exact: true }).click()
+  await page.keyboard.press('Escape')
+  await expect(page.locator('main [data-diff-layout="unified"]')).toBeVisible()
+})

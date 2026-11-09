@@ -46,6 +46,7 @@ export function useMenuState(): void {
   const syntax = useViewSettings((s) => s.syntax)
   const wordDiff = useViewSettings((s) => s.wordDiff)
   const wrap = useViewSettings((s) => s.wrap)
+  const splitDiff = useViewSettings((s) => s.diffLayout === 'split')
   const theme = useViewSettings((s) => s.theme)
   const repoId = repo?.id ?? ''
   const enabled = !!repo
@@ -107,6 +108,7 @@ export function useMenuState(): void {
     syntax,
     wordDiff,
     wrap,
+    splitDiff,
     theme
   }
   const json = JSON.stringify(state)
@@ -173,6 +175,9 @@ export async function runMenuCommand(command: MenuCommand, arg?: string): Promis
       return
     case 'view.wrap':
       settings.set({ wrap: !settings.wrap })
+      return
+    case 'view.splitDiff':
+      settings.set({ diffLayout: settings.diffLayout === 'split' ? 'unified' : 'split' })
       return
     case 'view.theme':
       if (arg) settings.set({ theme: arg, syntax: true })

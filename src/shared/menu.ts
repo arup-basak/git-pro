@@ -23,6 +23,7 @@ export type MenuCommand =
   | 'view.syntax'
   | 'view.wordDiff'
   | 'view.wrap'
+  | 'view.splitDiff'
   | 'view.theme'
   | 'remote.fetchAll'
   | 'remote.fetch'
@@ -81,6 +82,7 @@ export interface MenuState {
   syntax: boolean
   wordDiff: boolean
   wrap: boolean
+  splitDiff: boolean
   theme: string
 }
 
@@ -102,6 +104,7 @@ export const EMPTY_MENU_STATE: MenuState = {
   syntax: true,
   wordDiff: true,
   wrap: true,
+  splitDiff: false,
   theme: 'github-dark-default'
 }
 
