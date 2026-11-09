@@ -126,7 +126,23 @@ export interface RefsSnapshot {
   remotes: RemoteInfo[]
 }
 
-export type StashScope = 'all' | 'staged' | 'paths'
+export type StashScope = 'all' | 'staged' | 'paths' | 'lines'
+
+/**
+ * Some changed lines of one file's working-tree diff, chosen in the diff view. `changes` are
+ * ordinals of the `+`/`-` lines in that diff (0 = the first changed line). `diffHash` is
+ * `textHash()` of the diff text the selection was made on; a stale selection is refused.
+ */
+export interface LineSelection {
+  path: string
+  /** The diff is the staged one (index vs HEAD) rather than working tree vs index. */
+  staged: boolean
+  untracked: boolean
+  diffHash: string
+  changes: number[]
+}
+
+export type LineAction = 'stage' | 'unstage' | 'discard'
 
 /** A stash created and managed by Git Pro (stable ref + metadata, never shifts index). */
 export interface AppStash {
@@ -180,6 +196,8 @@ export interface StashSaveRequest {
   group: string
   scope: StashScope
   paths?: string[]
+  /** For scope 'lines': the selected lines (unstaged changes only). */
+  selections?: LineSelection[]
   includeUntracked: boolean
   /** Record the stash but leave the working tree as it is (a snapshot). */
   keepWorkingTree: boolean
@@ -210,6 +228,11 @@ export interface StashApplyPreview {
   files: PreviewFile[]
   trees: MergeTrees
   messages: string[]
+  /**
+   * The stash touches files with unstaged edits, so it is merged into the working tree (on
+   * top of those edits) instead of through the index; nothing gets staged.
+   */
+  onWorktree: boolean
 }
 
 export interface StashApplyResult {

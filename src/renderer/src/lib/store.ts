@@ -1,4 +1,11 @@
-import type { CommandLogEntry, MergeSource, PushSpec, RepoInfo, StashTarget } from '@shared/types'
+import type {
+  CommandLogEntry,
+  LineSelection,
+  MergeSource,
+  PushSpec,
+  RepoInfo,
+  StashTarget
+} from '@shared/types'
 import { create } from 'zustand'
 
 export type View = 'graph' | 'changes' | 'stashes' | 'history' | 'merge' | 'reflog' | 'backups'
@@ -10,6 +17,13 @@ export interface MergeRequest {
   title: string
   /** View to return to when the editor closes. */
   back: View
+}
+
+/** What the New stash dialog opens with: everything, the staged part, files, or lines. */
+export interface StashDialogRequest {
+  paths?: string[]
+  staged?: boolean
+  selections?: LineSelection[]
 }
 
 export interface HistoryRequest {
@@ -31,7 +45,7 @@ interface UiState {
   push: Partial<PushSpec> | null
   logOpen: boolean
   stashSel: StashTarget | null
-  stashDialog: { paths?: string[]; staged?: boolean } | null
+  stashDialog: StashDialogRequest | null
   merge: MergeRequest | null
   settingsOpen: boolean
   shortcutsOpen: boolean
@@ -46,7 +60,7 @@ interface UiState {
   closePush(): void
   toggleLog(open?: boolean): void
   selectStash(t: StashTarget | null): void
-  openStashDialog(opts: { paths?: string[]; staged?: boolean }): void
+  openStashDialog(opts: StashDialogRequest): void
   closeStashDialog(): void
   openMerge(req: Omit<MergeRequest, 'back'>): void
   closeMerge(): void

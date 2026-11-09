@@ -294,6 +294,18 @@ Open **Changes** in the sidebar (the badge counts changed files).
 - **Stage all / Unstage all / Discard all** apply to a whole list.
 - Discarding asks for confirmation and deletes untracked files. It cannot be undone, so stash instead if unsure.
 
+**Acting on hunks and single lines**
+
+The diff of the selected file has a narrow gutter on the left:
+
+- **Tick a changed line** to select it. **Shift-click** selects a range; **drag** down the gutter to select several lines.
+- The checkbox on a hunk header (`@@ … @@`) selects or clears every changed line in that hunk.
+- With lines selected, the bar above the diff offers **Stage lines**, **Stash lines…** and **Discard lines…** (or **Unstage lines** for a staged file).
+- Every hunk header also has its own buttons: **Stage hunk**, **Stash hunk…** and **Discard hunk…**, or **Unstage hunk**.
+- Selecting only the `+` side of a changed line stages just the addition; the removed line stays as it was.
+- This works in untracked files too, and in side-by-side mode.
+- If the file changes on disk after you selected lines, Git Pro refuses the action and shows the fresh diff, so it never applies a stale selection.
+
 **Commit box** (bottom-left)
 
 | Option               | Meaning                                                                                   |
@@ -324,8 +336,11 @@ Git Pro keeps two kinds of stash.
 Click **Stash** in the toolbar, or in Changes use **Stash all…**, **Stash staged…**, or tick files → **Stash…**. Then fill in:
 
 - **Name** (defaults to `WIP on <branch>`), **Group** (suggests existing groups), **Notes**.
-- **What to stash:** All changes / Staged only / Selected files.
-- **Include untracked files.**
+- **What to stash:** All changes / Staged only / Selected files / Selected lines.
+- **Include untracked files** (not used for selected lines).
+
+**Stashing lines.** In Changes, tick lines in a diff (or use a hunk's **Stash hunk…**) and choose **Stash lines…**. Only those lines leave your working tree; everything else, including anything you have staged, stays where it is. The stash is an ordinary app stash: you can preview it, apply it, or make a branch from it.
+
 - **Keep changes in the working tree:** records a snapshot without touching your files.
 
 ### The Stashes view
@@ -352,14 +367,15 @@ The **Apply preview** tab simulates `git stash apply` against your current works
 - **Applies cleanly** in green, or a count of conflicts and blocked files.
 - Each file gets an outcome:
 
-  | Mark            | Outcome                                                                                                                       |
-  | --------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-  | `M` / `A` / `D` | Will be modified / added / deleted                                                                                            |
-  | `U`             | Untracked file that will be restored                                                                                          |
-  | `!`             | **Conflict** — click _merge_ or **Preview merge** to see the result in a read-only merge editor                               |
-  | `×`             | **Blocked** — you have uncommitted changes to that file, or an untracked file with that name already exists; git would refuse |
+  | Mark            | Outcome                                                                                                                      |
+  | --------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+  | `M` / `A` / `D` | Will be modified / added / deleted                                                                                           |
+  | `U`             | Untracked file that will be restored                                                                                         |
+  | `!`             | **Conflict** — click _merge_ or **Preview merge** to see the result in a read-only merge editor                              |
+  | `×`             | **Blocked** — the stash changes the same lines as your uncommitted edits, or an untracked file with that name already exists |
 
 - Selecting a file shows the diff of exactly what will change in your working tree.
+- **Applying on top of uncommitted edits.** Plain `git stash apply` refuses to touch a file you are still editing. When that happens, Git Pro merges the stash into those files on disk instead, and the preview says **Applies on top of your uncommitted edits**. Nothing is staged. If a stashed line overlaps one of your edits, the file is shown as blocked and nothing is applied.
 - **Restore staged state (--index)** also re-stages what was staged when the stash was made.
 - **Apply** keeps the stash. **Apply & remove** moves an app stash to Recently deleted, or pops a stack entry. Both are disabled while files are blocked.
 

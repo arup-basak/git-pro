@@ -7,6 +7,7 @@ import * as backup from './git/backup'
 import * as branches from './git/branches'
 import * as commits from './git/commits'
 import * as history from './git/history'
+import * as hunks from './git/hunks'
 import * as log from './git/log'
 import * as merge from './git/merge'
 import * as op from './git/opstate'
@@ -142,6 +143,7 @@ const handlers: Handlers = {
   'worktree.unstage': async (repoId, paths) => wt.unstage(repo(repoId), paths),
   'worktree.discard': async (repoId, tracked, untracked) =>
     wt.discard(repo(repoId), tracked, untracked),
+  'worktree.applyLines': async (repoId, action, sel) => hunks.applyLines(repo(repoId), action, sel),
   'worktree.commit': async (repoId, req) => wt.commit(repo(repoId), req),
 
   'branch.create': async (repoId, name, start, checkout) =>

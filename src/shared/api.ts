@@ -25,7 +25,9 @@ import type {
   MergeSource,
   MergeVersions,
   MergeResolution,
-  GitDate
+  GitDate,
+  LineAction,
+  LineSelection
 } from './types'
 import type { MenuState } from './menu'
 
@@ -71,6 +73,8 @@ export interface GitProApi {
   'worktree.stage'(repoId: string, paths: string[]): Promise<void>
   'worktree.unstage'(repoId: string, paths: string[]): Promise<void>
   'worktree.discard'(repoId: string, tracked: string[], untracked: string[]): Promise<void>
+  /** Stage, unstage or discard only the selected lines of one file. */
+  'worktree.applyLines'(repoId: string, action: LineAction, sel: LineSelection): Promise<void>
   'worktree.commit'(repoId: string, req: CommitRequest): Promise<string>
 
   'branch.create'(

@@ -2,6 +2,8 @@ import { nowGitDate } from '@shared/dates'
 import type {
   AppStash,
   GitDate,
+  LineAction,
+  LineSelection,
   ResetMode,
   StackStash,
   StashTarget,
@@ -90,6 +92,30 @@ export async function discardChanges(list: StatusEntry[]): Promise<boolean> {
     'Changes discarded'
   )
   return true
+}
+
+/** Stages, unstages or discards some lines of one file. Resolves to true when it ran. */
+export async function applyLines(action: LineAction, sel: LineSelection): Promise<boolean> {
+  const n = sel.changes.length
+  if (!n) return false
+  if (action === 'discard') {
+    const ok = await confirmDialog({
+      title: `Discard ${n} changed line${n === 1 ? '' : 's'}?`,
+      message: `In ${sel.path}.\n\nThis cannot be undone. Consider stashing the lines instead.`,
+      confirmLabel: 'Discard',
+      danger: true
+    })
+    if (!ok) return false
+  }
+  const done = await run(
+    async () => {
+      await call('worktree.applyLines', repoId(), action, sel)
+      return true
+    },
+    action === 'discard' ? `Discarded ${n} line${n === 1 ? '' : 's'}` : undefined,
+    action === 'stage' ? 'Could not stage' : action === 'unstage' ? 'Could not unstage' : undefined
+  )
+  return done === true
 }
 
 /* ---------- branches ---------- */
@@ -380,7 +406,9 @@ export async function deleteRemoteTag(remote: string, name: string): Promise<voi
 
 /* ---------- stash ---------- */
 
-export function stashSave(opts: { paths?: string[]; staged?: boolean } = {}): void {
+export function stashSave(
+  opts: { paths?: string[]; staged?: boolean; selections?: LineSelection[] } = {}
+): void {
   useUi.getState().openStashDialog(opts)
 }
 

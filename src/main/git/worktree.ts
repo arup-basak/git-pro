@@ -32,14 +32,17 @@ export async function worktreeDiff(
   untracked: boolean
 ): Promise<string> {
   checkPaths([path])
+  // Fixed prefixes and no external diff tool, whatever the user's config says: the output is
+  // parsed, and fed back to `git apply` for line staging.
+  const base = ['diff', '--no-ext-diff', '--src-prefix=a/', '--dst-prefix=b/']
   if (untracked) {
-    const r = await git(cwd, ['diff', '--no-index', '--', '/dev/null', path], {
+    const r = await git(cwd, [...base, '--no-index', '--', '/dev/null', path], {
       allowFail: true,
       quietStdout: true
     })
     return r.stdout
   }
-  const args = ['diff', '-M', ...(staged ? ['--cached'] : []), '--', path]
+  const args = [...base, '-M', ...(staged ? ['--cached'] : []), '--', path]
   return (await git(cwd, args, { quietStdout: true })).stdout
 }
 

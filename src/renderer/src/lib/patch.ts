@@ -3,6 +3,17 @@ export interface DiffLine {
   text: string
   oldNo?: number
   newNo?: number
+  /** Index of the hunk this line belongs to (set on hunk headers and the lines below them). */
+  hunk?: number
+  /** For add/del lines: ordinal among the file's changed lines (what line selections use). */
+  change?: number
+}
+
+export interface DiffHunk {
+  /** Index of the `@@` line in `lines`. */
+  header: number
+  /** Change ordinals (see DiffLine.change) of the hunk's added and removed lines. */
+  changes: number[]
 }
 
 export interface DiffFile {
@@ -10,6 +21,7 @@ export interface DiffFile {
   /** Path on the new side (used for language detection). */
   path: string
   lines: DiffLine[]
+  hunks: DiffHunk[]
   binary: boolean
 }
 
@@ -78,6 +90,7 @@ export function parsePatch(patch: string): { files: DiffFile[]; truncated: boole
   let count = 0
   let truncated = false
   let inHunk = false
+  let change = 0
   for (const line of patch.split('\n')) {
     if (line.startsWith('diff --git ')) {
       const m = /^diff --git a\/(.*) b\/(.*)$/.exec(line)
@@ -85,8 +98,10 @@ export function parsePatch(patch: string): { files: DiffFile[]; truncated: boole
         title: m ? (m[1] === m[2] ? m[2] : `${m[1]} → ${m[2]}`) : line,
         path: m ? (m[2] === 'dev/null' ? m[1] : m[2]) : '',
         lines: [],
+        hunks: [],
         binary: false
       }
+      change = 0
       files.push(file)
       inHunk = false
       continue
@@ -103,7 +118,8 @@ export function parsePatch(patch: string): { files: DiffFile[]; truncated: boole
         newNo = Number(m[2])
       }
       inHunk = true
-      file.lines.push({ kind: 'hunk', text: line })
+      file.hunks.push({ header: file.lines.length, changes: [] })
+      file.lines.push({ kind: 'hunk', text: line, hunk: file.hunks.length - 1 })
       continue
     }
     if (!inHunk) {
@@ -115,12 +131,20 @@ export function parsePatch(patch: string): { files: DiffFile[]; truncated: boole
       }
       continue
     }
-    if (line.startsWith('+')) file.lines.push({ kind: 'add', text: line.slice(1), newNo: newNo++ })
-    else if (line.startsWith('-'))
-      file.lines.push({ kind: 'del', text: line.slice(1), oldNo: oldNo++ })
-    else if (line.startsWith(' '))
-      file.lines.push({ kind: 'ctx', text: line.slice(1), oldNo: oldNo++, newNo: newNo++ })
-    else if (line.startsWith('\\')) file.lines.push({ kind: 'meta', text: line })
+    const hunk = file.hunks.length - 1
+    if (line.startsWith('+') || line.startsWith('-')) {
+      const add = line[0] === '+'
+      file.hunks[hunk].changes.push(change)
+      file.lines.push({
+        kind: add ? 'add' : 'del',
+        text: line.slice(1),
+        ...(add ? { newNo: newNo++ } : { oldNo: oldNo++ }),
+        hunk,
+        change: change++
+      })
+    } else if (line.startsWith(' '))
+      file.lines.push({ kind: 'ctx', text: line.slice(1), oldNo: oldNo++, newNo: newNo++, hunk })
+    else if (line.startsWith('\\')) file.lines.push({ kind: 'meta', text: line, hunk })
   }
   return { files, truncated }
 }

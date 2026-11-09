@@ -1,5 +1,5 @@
-import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import type {
   AppStash,
   PreviewFile,
@@ -9,7 +9,8 @@ import type {
   StashFile,
   StashOverview,
   StashSaveRequest,
-  StashTarget
+  StashTarget,
+  StatusEntry
 } from '../../shared/types'
 import { FS, RS } from './parse'
 import { git, gitOut } from './runner'
@@ -21,7 +22,8 @@ import {
   writeStore,
   type StashMeta
 } from './stashStore'
-import { assertBranchName, currentBranch, emptyTree, tryResolve } from './util'
+import { buildPartialPatch, currentDiff, insideWorktree, removeUntrackedLines } from './hunks'
+import { assertBranchName, currentBranch, emptyTree, tryResolve, withTempIndex } from './util'
 import { getStatus } from './worktree'
 
 export const APP_PREFIX = 'refs/git-pro/stashes/'
@@ -135,26 +137,34 @@ export async function saveStash(cwd: string, req: StashSaveRequest): Promise<App
   for (const p of req.paths ?? [])
     if (!p || p.includes('\0')) throw new Error(`Invalid path "${p}"`)
 
-  const before = await tryResolve(cwd, 'refs/stash')
-  const args = ['stash', 'push', '-m', name]
-  if (req.scope === 'staged') args.push('--staged')
-  else if (req.includeUntracked) args.push('--include-untracked')
-  if (req.scope === 'paths') args.push('--', ...req.paths!)
-  const r = await git(cwd, args, { write: true })
-  const sha = await tryResolve(cwd, 'refs/stash')
-  if (!sha || sha === before) {
-    throw new Error(r.stdout.trim() || r.stderr.trim() || 'No local changes to stash')
-  }
-
-  // Move the entry off git's stack into its own stable ref.
   const id = newStashId()
   const ref = APP_PREFIX + id
-  await git(cwd, ['update-ref', '-m', `git-pro stash: ${name}`, ref, sha], { write: true })
-  const top = await tryResolve(cwd, 'stash@{0}')
-  if (top === sha) await git(cwd, ['stash', 'drop', '--quiet', 'stash@{0}'], { write: true })
+  let sha: string
+  if (req.scope === 'lines') {
+    sha = await saveLineStash(cwd, req, name)
+    await git(cwd, ['update-ref', '-m', `git-pro stash: ${name}`, ref, sha], { write: true })
+    if (!req.keepWorkingTree) await removeStashedLines(cwd, req)
+  } else {
+    const before = await tryResolve(cwd, 'refs/stash')
+    const args = ['stash', 'push', '-m', name]
+    if (req.scope === 'staged') args.push('--staged')
+    else if (req.includeUntracked) args.push('--include-untracked')
+    if (req.scope === 'paths') args.push('--', ...req.paths!)
+    const r = await git(cwd, args, { write: true })
+    const pushed = await tryResolve(cwd, 'refs/stash')
+    if (!pushed || pushed === before) {
+      throw new Error(r.stdout.trim() || r.stderr.trim() || 'No local changes to stash')
+    }
+    sha = pushed
 
-  if (req.keepWorkingTree) {
-    await git(cwd, ['stash', 'apply', '--index', '--quiet', sha], { write: true })
+    // Move the entry off git's stack into its own stable ref.
+    await git(cwd, ['update-ref', '-m', `git-pro stash: ${name}`, ref, sha], { write: true })
+    const top = await tryResolve(cwd, 'stash@{0}')
+    if (top === sha) await git(cwd, ['stash', 'drop', '--quiet', 'stash@{0}'], { write: true })
+
+    if (req.keepWorkingTree) {
+      await git(cwd, ['stash', 'apply', '--index', '--quiet', sha], { write: true })
+    }
   }
 
   const baseSha = await gitOut(cwd, ['rev-parse', `${sha}^1`])
@@ -168,11 +178,97 @@ export async function saveStash(cwd: string, req: StashSaveRequest): Promise<App
     baseSha,
     createdAt: Date.now(),
     scope: req.scope,
-    includeUntracked: req.scope !== 'staged' && req.includeUntracked
+    includeUntracked: req.scope !== 'staged' && req.scope !== 'lines' && req.includeUntracked
   }
   await updateMeta(cwd, id, () => meta)
   const baseSubject = await gitOut(cwd, ['log', '-1', '--format=%s', baseSha])
   return { ...meta, ref, sha, baseSubject }
+}
+
+/**
+ * Builds a stash commit holding only the selected lines, with the same shape as one made by
+ * `git stash` (first parent: the base; second parent: an index commit; tree: base + the
+ * selected changes), so preview, apply, branch-from-stash and the file list work unchanged.
+ *
+ * The selected lines come from unstaged diffs (index → working tree), so the base is the
+ * current index. When nothing is staged that is HEAD itself; otherwise it is a snapshot commit
+ * of the staged state on top of HEAD. Either way the stash's own diff is exactly the selected
+ * lines, and staged work is neither stashed nor touched.
+ */
+async function saveLineStash(cwd: string, req: StashSaveRequest, name: string): Promise<string> {
+  if (!(await tryResolve(cwd, 'HEAD'))) throw new Error('Make a first commit before stashing lines')
+  const patches: string[] = []
+  for (const sel of req.selections ?? []) {
+    if (sel.staged) throw new Error('Only unstaged changes can be stashed line by line')
+    const patch = buildPartialPatch(await currentDiff(cwd, sel), new Set(sel.changes), false)
+    if (patch) patches.push(patch)
+  }
+  if (!patches.length) throw new Error('Select at least one changed line to stash')
+
+  const label = (await currentBranch(cwd)) ?? '(no branch)'
+  const subject = await gitOut(cwd, ['log', '-1', '--format=%h %s', 'HEAD'])
+  const noSign = '--no-gpg-sign'
+  const indexTree = await gitOut(cwd, ['write-tree'], { write: true })
+  const base =
+    indexTree === (await gitOut(cwd, ['rev-parse', 'HEAD^{tree}']))
+      ? await gitOut(cwd, ['rev-parse', 'HEAD'])
+      : await gitOut(cwd, [
+          'commit-tree',
+          noSign,
+          indexTree,
+          '-p',
+          'HEAD',
+          '-m',
+          `staged on ${label}: ${subject}`
+        ])
+  const tree = await withTempIndex(cwd, async (env) => {
+    await git(cwd, ['read-tree', indexTree], { env })
+    await git(cwd, ['apply', '--cached', '--recount', '--whitespace=nowarn', '-'], {
+      env,
+      input: patches.join('')
+    })
+    return gitOut(cwd, ['write-tree'], { env })
+  })
+  const index = await gitOut(cwd, [
+    'commit-tree',
+    noSign,
+    indexTree,
+    '-p',
+    base,
+    '-m',
+    `index on ${label}: ${subject}`
+  ])
+  return gitOut(cwd, [
+    'commit-tree',
+    noSign,
+    tree,
+    '-p',
+    base,
+    '-p',
+    index,
+    '-m',
+    `On ${label}: ${name}`
+  ])
+}
+
+/** Takes the stashed lines out of the working tree (after the stash ref is safely written). */
+async function removeStashedLines(cwd: string, req: StashSaveRequest): Promise<void> {
+  const reverse: string[] = []
+  for (const sel of req.selections ?? []) {
+    const selected = new Set(sel.changes)
+    if (sel.untracked) {
+      removeUntrackedLines(cwd, sel.path, selected)
+      continue
+    }
+    const patch = buildPartialPatch(await currentDiff(cwd, sel), selected, true)
+    if (patch) reverse.push(patch)
+  }
+  if (reverse.length) {
+    await git(cwd, ['apply', '-R', '--recount', '--whitespace=nowarn', '-'], {
+      write: true,
+      input: reverse.join('')
+    })
+  }
 }
 
 /** Moves an entry from git's stash stack into the app's structured stashes. */
@@ -328,14 +424,14 @@ export async function previewApply(cwd: string, sha: string): Promise<StashApply
   if (status.entries.some((e) => e.conflicted)) {
     throw new Error('Resolve the current conflicts before previewing a stash')
   }
-  const ours = await gitOut(cwd, ['write-tree'], { write: true })
+  const dirty = unstagedPaths(status.entries)
+  const onWorktree = await appliesOnWorktree(cwd, sha, dirty)
+  const ours = onWorktree
+    ? await worktreeTree(cwd)
+    : await gitOut(cwd, ['write-tree'], { write: true })
   const base = await gitOut(cwd, ['rev-parse', `${sha}^1^{tree}`])
   const theirs = await gitOut(cwd, ['rev-parse', `${sha}^{tree}`])
   const merged = await mergeTrees(cwd, base, ours, theirs)
-
-  const dirty = new Set(
-    status.entries.filter((e) => e.worktree !== '.' && !e.untracked).map((e) => e.path)
-  )
   const files: PreviewFile[] = []
   const ns = (
     await gitOut(cwd, ['diff-tree', '-r', '-z', '--name-status', '--no-renames', ours, merged.tree])
@@ -347,9 +443,12 @@ export async function previewApply(cwd: string, sha: string): Promise<StashApply
     const path = ns[i + 1]
     i++
     seen.add(path)
+    // On the working tree, a conflict would hit uncommitted edits: refuse rather than merge.
     const outcome: PreviewFile['outcome'] = merged.conflicted.has(path)
-      ? 'conflict'
-      : dirty.has(path)
+      ? onWorktree
+        ? 'blocked'
+        : 'conflict'
+      : (!onWorktree && dirty.has(path)) || (letter === 'A' && existsSync(join(cwd, path)))
         ? 'blocked'
         : letter === 'A'
           ? 'added'
@@ -359,7 +458,9 @@ export async function previewApply(cwd: string, sha: string): Promise<StashApply
     files.push({ path, outcome, untracked: false })
   }
   for (const p of merged.conflicted) {
-    if (!seen.has(p)) files.push({ path: p, outcome: 'conflict', untracked: false })
+    if (!seen.has(p)) {
+      files.push({ path: p, outcome: onWorktree ? 'blocked' : 'conflict', untracked: false })
+    }
   }
   if (await tryResolve(cwd, `${sha}^3`)) {
     const untracked = (await gitOut(cwd, ['ls-tree', '-r', '-z', '--name-only', `${sha}^3`])).split(
@@ -383,8 +484,111 @@ export async function previewApply(cwd: string, sha: string): Promise<StashApply
     clean,
     files,
     trees: { base, ours, theirs, result: merged.tree },
-    messages: merged.messages
+    messages: merged.messages,
+    onWorktree
   }
+}
+
+/** Tracked paths with unstaged edits. */
+function unstagedPaths(entries: StatusEntry[]): Set<string> {
+  return new Set(entries.filter((e) => e.worktree !== '.' && !e.untracked).map((e) => e.path))
+}
+
+/**
+ * True when the stash touches files that have unstaged edits. `git stash apply` refuses
+ * those, so the stash is merged into the working tree instead (see applyOnWorktree). Stashes
+ * with an untracked-files part keep git's own apply.
+ */
+async function appliesOnWorktree(cwd: string, sha: string, dirty: Set<string>): Promise<boolean> {
+  if (!dirty.size || (await tryResolve(cwd, `${sha}^3`))) return false
+  const touched = await gitOut(cwd, [
+    'diff-tree',
+    '-r',
+    '-z',
+    '--name-only',
+    '--no-renames',
+    `${sha}^1`,
+    sha
+  ])
+  return touched.split('\0').some((p) => p && dirty.has(p))
+}
+
+/** Tree of the tracked files as they are on disk (index + unstaged edits). */
+async function worktreeTree(cwd: string): Promise<string> {
+  const index = await gitOut(cwd, ['write-tree'], { write: true })
+  return withTempIndex(cwd, async (env) => {
+    await git(cwd, ['read-tree', index], { env })
+    await git(cwd, ['add', '-u'], { env })
+    return gitOut(cwd, ['write-tree'], { env })
+  })
+}
+
+/** Writes every file that differs between two trees into the working tree (index untouched). */
+async function checkoutTreeChanges(cwd: string, from: string, to: string): Promise<void> {
+  const ns = (
+    await gitOut(cwd, ['diff-tree', '-r', '-z', '--name-status', '--no-renames', from, to])
+  ).split('\0')
+  for (let i = 0; i + 1 < ns.length; i += 2) {
+    const letter = ns[i]
+    const path = ns[i + 1]
+    if (!letter || !path) continue
+    const abs = insideWorktree(cwd, path)
+    if (letter === 'D') {
+      rmSync(abs, { force: true })
+      continue
+    }
+    const entry = await gitOut(cwd, ['ls-tree', '-z', to, '--', path])
+    const m = /^(\d{6}) \w+ ([0-9a-f]+)\t/.exec(entry)
+    if (!m || m[1] === '160000') continue
+    const blob = (await git(cwd, ['cat-file', 'blob', m[2]], { quietStdout: true })).stdoutBuf
+    mkdirSync(dirname(abs), { recursive: true })
+    rmSync(abs, { force: true })
+    if (m[1] === '120000') symlinkSync(blob.toString('utf8'), abs)
+    else writeFileSync(abs, blob, { mode: m[1] === '100755' ? 0o755 : 0o644 })
+  }
+}
+
+/**
+ * Applies a stash on top of uncommitted edits: a 3-way merge of the stash with the working
+ * tree as "ours", written straight to disk. Anything that would conflict is refused up front,
+ * so uncommitted work is never mixed with conflict markers.
+ */
+async function applyOnWorktree(
+  cwd: string,
+  target: StashTarget,
+  sha: string,
+  pop: boolean
+): Promise<StashApplyResult> {
+  const ours = await worktreeTree(cwd)
+  const base = await gitOut(cwd, ['rev-parse', `${sha}^1^{tree}`])
+  const theirs = await gitOut(cwd, ['rev-parse', `${sha}^{tree}`])
+  const merged = await mergeTrees(cwd, base, ours, theirs)
+  if (!merged.clean) {
+    throw new Error(
+      `Applying this stash would conflict with uncommitted changes in ${[...merged.conflicted].join(', ')}. Commit or stash those changes first.`
+    )
+  }
+  const added = (
+    await gitOut(cwd, [
+      'diff-tree',
+      '-r',
+      '-z',
+      '--name-only',
+      '--diff-filter=A',
+      ours,
+      merged.tree
+    ])
+  )
+    .split('\0')
+    .filter((p) => p && existsSync(join(cwd, p)))
+  if (added.length) throw new Error(`${added.join(', ')} already exists in the working tree`)
+  await checkoutTreeChanges(cwd, ours, merged.tree)
+  let dropped = false
+  if (pop) {
+    await deleteStash(cwd, target)
+    dropped = true
+  }
+  return { clean: true, conflicted: [], dropped, output: 'Applied on top of uncommitted changes' }
 }
 
 /* ---------------- applying ---------------- */
@@ -395,6 +599,15 @@ export async function applyStash(
   opts: { pop: boolean; restoreIndex: boolean }
 ): Promise<StashApplyResult> {
   const t = await resolveTarget(cwd, target)
+  if (!opts.restoreIndex) {
+    const status = await getStatus(cwd)
+    if (status.entries.some((e) => e.conflicted)) {
+      throw new Error('Resolve the current conflicts before applying a stash')
+    }
+    if (await appliesOnWorktree(cwd, t.sha, unstagedPaths(status.entries))) {
+      return applyOnWorktree(cwd, target, t.sha, opts.pop)
+    }
+  }
   const args = ['-c', 'merge.conflictStyle=diff3', 'stash', 'apply']
   if (opts.restoreIndex) args.push('--index')
   args.push(t.sha)

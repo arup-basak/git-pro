@@ -271,3 +271,46 @@ test('shows diffs side by side when switched on in View', async () => {
   await page.keyboard.press('Escape')
   await expect(page.locator('main [data-diff-layout="unified"]')).toBeVisible()
 })
+
+test('stages one hunk, stashes a single line and applies it on top of new edits', async () => {
+  const rows = Array.from({ length: 20 }, (_, i) => `row ${i + 1}`)
+  commit('rows.txt', rows.join('\n') + '\n', 'rows', 1_700_040_000)
+  const edited = [...rows]
+  edited[1] = 'ROW 2'
+  edited[17] = 'ROW 18'
+  writeFileSync(join(repoDir, 'rows.txt'), edited.join('\n') + '\n')
+  const rowsFile = (): string => readFileSync(join(repoDir, 'rows.txt'), 'utf8')
+
+  await page.locator('aside').getByText('Changes', { exact: true }).first().click()
+  await page.getByText('rows.txt').first().click()
+  await page.getByRole('button', { name: 'Stage hunk' }).first().click()
+  await expect.poll(() => git(repoDir, 'diff', '--cached', '--', 'rows.txt')).toContain('+ROW 2')
+  expect(git(repoDir, 'diff', '--cached', '--', 'rows.txt')).not.toContain('ROW 18')
+  await shot('13-hunk-staged')
+
+  // Tick the single added line in the gutter and stash just that line.
+  const added = page.locator('main tr', { hasText: 'ROW 18' }).filter({ hasText: '+' })
+  await added.locator('td[title^="Select this line"]').click()
+  await expect(page.getByText('1 line selected')).toBeVisible()
+  await shot('14-line-selected')
+  await page.getByRole('button', { name: 'Stash lines…' }).click()
+  const dlg = page.getByRole('dialog')
+  await dlg.locator('input[data-autofocus]').fill('one line')
+  await dlg.getByRole('button', { name: 'Stash 1 line' }).click()
+  await expect(page.getByText('Stashed “one line”')).toBeVisible()
+  // The added line left the file; the staged hunk stayed staged.
+  await expect.poll(rowsFile).not.toContain('ROW 18')
+  expect(git(repoDir, 'diff', '--cached', '--', 'rows.txt')).toContain('+ROW 2')
+
+  // Keep editing the file, then bring the stashed line back on top of those edits.
+  git(repoDir, 'checkout', '--', 'rows.txt')
+  writeFileSync(join(repoDir, 'rows.txt'), rowsFile().replace('row 10\n', 'ROW 10\n'))
+  await page.locator('aside').getByText('Stashes', { exact: true }).first().click()
+  await page.getByText('one line').first().click()
+  await page.getByRole('button', { name: 'Preview apply' }).click()
+  await expect(page.getByText('Applies on top of your uncommitted edits')).toBeVisible()
+  await page.getByRole('button', { name: 'Apply & remove' }).click()
+  await expect.poll(rowsFile).toContain('ROW 18')
+  expect(rowsFile()).toContain('ROW 2\n')
+  expect(rowsFile()).toContain('ROW 10\n')
+})

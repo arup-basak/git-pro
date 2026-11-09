@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { git, gitOut } from './runner'
 
@@ -72,4 +72,24 @@ export async function isDirty(cwd: string): Promise<boolean> {
 
 export function pathInGitDir(dir: string, ...parts: string[]): string {
   return join(dir, ...parts)
+}
+
+let tmpIndexSeq = 0
+
+/**
+ * Runs `fn` with an environment that points git at a throwaway index file, so trees can be
+ * built without touching the real index. The file is removed afterwards.
+ */
+export async function withTempIndex<T>(
+  cwd: string,
+  fn: (env: Record<string, string>) => Promise<T>
+): Promise<T> {
+  const dir = join(await gitDir(cwd), 'git-pro')
+  mkdirSync(dir, { recursive: true })
+  const file = join(dir, `tmp-index-${process.pid}-${Date.now()}-${tmpIndexSeq++}`)
+  try {
+    return await fn({ GIT_INDEX_FILE: file })
+  } finally {
+    rmSync(file, { force: true })
+  }
 }

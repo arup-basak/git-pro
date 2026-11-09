@@ -1,13 +1,14 @@
-import type { StatusEntry } from '@shared/types'
+import { textHash } from '@shared/hash'
+import type { LineAction, LineSelection, StatusEntry } from '@shared/types'
 import { useQuery } from '@tanstack/react-query'
 import { Archive, GitMerge, Minus, Plus, Undo2 } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
-import { discardChanges, openLiveMerge, run, stashSave } from '../../lib/actions'
+import { applyLines, discardChanges, openLiveMerge, run, stashSave } from '../../lib/actions'
 import { call } from '../../lib/api'
 import { cx } from '../../lib/format'
 import { useRepoId, useStatus } from '../../lib/queries'
 import { FileRow } from '../commit/CommitDetails'
-import { DiffView } from '../commit/DiffView'
+import { DiffView, type DiffSelection } from '../commit/DiffView'
 import { Button, Empty } from '../ui'
 import { CommitComposer } from './CommitComposer'
 
@@ -96,10 +97,34 @@ const IconBtn = ({
   </button>
 )
 
+const NO_LINES: ReadonlySet<number> = new Set()
+
+/** Small text button shown on a hunk header. */
+const HunkBtn = ({
+  label,
+  onClick,
+  danger
+}: {
+  label: string
+  onClick: () => void
+  danger?: boolean
+}) => (
+  <button
+    onMouseDown={(e) => e.stopPropagation()}
+    onClick={onClick}
+    className={cx(
+      'rounded border border-line bg-panel px-1.5 font-sans text-[11px] leading-[17px] text-muted hover:border-line-strong',
+      danger ? 'hover:text-bad' : 'hover:text-fg'
+    )}
+  >
+    {label}
+  </button>
+)
+
 export function ChangesView() {
   const repoId = useRepoId()
   const status = useStatus()
-  const [focus, setFocus] = useState<Focus>(null)
+  const [picked, setFocus] = useState<Focus>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const entries = useMemo(() => status.data?.entries ?? [], [status.data])
   const conflicted = entries.filter((e) => e.conflicted)
@@ -107,11 +132,70 @@ export function ChangesView() {
   const unstaged = entries.filter((e) => !e.conflicted && (e.untracked || e.worktree !== '.'))
   const selectedPaths = [...selected].filter((p) => entries.some((e) => e.path === p))
 
+  // Follow the focused file when all of its changes move to the other list (or it conflicts).
+  const focus = useMemo<Focus>(() => {
+    if (!picked || !status.data) return picked
+    const list = picked.conflicted ? conflicted : picked.staged ? staged : unstaged
+    if (list.some((e) => e.path === picked.path)) return picked
+    const c = conflicted.find((e) => e.path === picked.path)
+    if (c) return { ...picked, conflicted: true }
+    const other = (picked.staged ? unstaged : staged).find((e) => e.path === picked.path)
+    return other
+      ? { path: other.path, staged: !picked.staged, untracked: other.untracked, conflicted: false }
+      : null
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [picked, entries])
+
   const diff = useQuery({
     queryKey: ['repo', repoId, 'wt-diff', focus],
     queryFn: () => call('worktree.diff', repoId, focus!.path, focus!.staged, focus!.untracked),
     enabled: !!focus && !focus.conflicted
   })
+  const patch = diff.data ?? ''
+  const diffHash = useMemo(() => textHash(patch), [patch])
+
+  // Selected lines belong to one exact diff; any change to it starts a fresh selection.
+  const selKey = focus ? `${focus.path}\0${focus.staged}\0${diffHash}` : ''
+  const [lines, setLines] = useState<{ key: string; set: ReadonlySet<number> }>({
+    key: '',
+    set: NO_LINES
+  })
+  const lineSel = lines.key === selKey ? lines.set : NO_LINES
+  const clearLines = (): void => setLines({ key: '', set: NO_LINES })
+  const lineSelection = (changes: number[]): LineSelection => ({
+    path: focus!.path,
+    staged: focus!.staged,
+    untracked: focus!.untracked,
+    diffHash,
+    changes
+  })
+  const actLines = async (action: LineAction, changes: number[]): Promise<void> => {
+    if (await applyLines(action, lineSelection(changes))) clearLines()
+  }
+  const stashLines = (changes: number[]): void =>
+    stashSave({ selections: [lineSelection(changes)] })
+
+  const selection: DiffSelection | undefined =
+    focus && !focus.conflicted && diff.data !== undefined
+      ? {
+          selected: lineSel,
+          onChange: (next) => setLines({ key: selKey, set: next }),
+          hunkActions: (changes) =>
+            focus.staged ? (
+              <HunkBtn label="Unstage hunk" onClick={() => void actLines('unstage', changes)} />
+            ) : (
+              <>
+                <HunkBtn label="Stage hunk" onClick={() => void actLines('stage', changes)} />
+                <HunkBtn label="Stash hunk…" onClick={() => stashLines(changes)} />
+                <HunkBtn
+                  label="Discard hunk…"
+                  danger
+                  onClick={() => void actLines('discard', changes)}
+                />
+              </>
+            )
+        }
+      : undefined
 
   const toggle = (p: string): void =>
     setSelected((s) => {
@@ -310,7 +394,57 @@ export function ChangesView() {
             </Button>
           </Empty>
         ) : focus ? (
-          <DiffView patch={diff.data ?? ''} loading={diff.isLoading} />
+          <div className="flex h-full min-h-0 flex-col">
+            <div className="flex h-10 shrink-0 items-center gap-1.5 border-b border-line px-3 text-xs">
+              <span className="mono min-w-0 truncate text-muted">{focus.path}</span>
+              <span className="shrink-0 text-faint">
+                {focus.staged ? 'staged' : focus.untracked ? 'untracked' : 'unstaged'}
+              </span>
+              <div className="flex-1" />
+              {lineSel.size > 0 ? (
+                <>
+                  <span className="mr-1 text-muted">
+                    {lineSel.size} line{lineSel.size === 1 ? '' : 's'} selected
+                  </span>
+                  {focus.staged ? (
+                    <Button size="sm" onClick={() => void actLines('unstage', [...lineSel])}>
+                      Unstage lines
+                    </Button>
+                  ) : (
+                    <>
+                      <Button size="sm" onClick={() => void actLines('stage', [...lineSel])}>
+                        Stage lines
+                      </Button>
+                      <Button
+                        size="sm"
+                        icon={<Archive size={11} />}
+                        onClick={() => stashLines([...lineSel])}
+                      >
+                        Stash lines…
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        onClick={() => void actLines('discard', [...lineSel])}
+                      >
+                        Discard lines…
+                      </Button>
+                    </>
+                  )}
+                  <Button size="sm" variant="ghost" onClick={clearLines}>
+                    Clear
+                  </Button>
+                </>
+              ) : (
+                <span className="shrink-0 text-faint">
+                  Tick lines in the gutter, or use a hunk’s buttons
+                </span>
+              )}
+            </div>
+            <div className="min-h-0 flex-1">
+              <DiffView patch={patch} loading={diff.isLoading} selection={selection} />
+            </div>
+          </div>
         ) : (
           <Empty>Select a file to see its changes</Empty>
         )}
