@@ -1,14 +1,14 @@
-import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { toGitDateArg } from '../../shared/dates'
-import type { HistoryPlan, HistoryRange, RewriteResult, RowEdit } from '../../shared/types'
+import type { HistoryPlan, HistoryRange, OpState, RewriteResult, RowEdit } from '../../shared/types'
 import { createBackup } from './backup'
-import { detectOp } from './opstate'
+import { NON_INTERACTIVE_EDITOR, abortOp, continueOp, detectOp, skipOp } from './opstate'
 import { hasMetadataEdit, refsContaining } from './plan'
 import { normalizeMessage } from './rewrite'
 import { git, gitOut, shQuote } from './runner'
 import { assertBranchName, currentBranch, gitDir, isDirty, refExists } from './util'
-import { assertPerson } from './worktree'
+import { assertPerson, getStatus } from './worktree'
 
 interface Group {
   pick: RowEdit
@@ -49,7 +49,7 @@ export function buildTodo(
       )
       todo.push(`exec sh ${shQuote(join(dir, `pre-${i}.sh`))}`)
     }
-    todo.push(`pick ${e.sha}`)
+    todo.push(`${e.action === 'edit' ? 'edit' : 'pick'} ${e.sha}`)
     for (const m of g.members) todo.push(`${m.action === 'fixup' ? 'fixup' : 'squash'} ${m.sha}`)
     if (!needsAmend) return
 
@@ -107,8 +107,10 @@ export async function rebaseRewrite(
   }
   const firstKept = plan.rows.find((r) => r.action !== 'drop')
   if (!firstKept) throw new Error('You cannot drop every commit in the range')
-  if (firstKept.action !== 'pick') {
-    throw new Error('The oldest kept commit must be "pick": squash/fixup need a commit before them')
+  if (firstKept.action !== 'pick' && firstKept.action !== 'edit') {
+    throw new Error(
+      'The oldest kept commit must be "pick" or "edit": squash/fixup need a commit before them'
+    )
   }
   for (const r of plan.rows) {
     if (r.author) assertPerson(r.author)
@@ -141,7 +143,7 @@ export async function rebaseRewrite(
   const dropped: RowEdit[] = []
   for (const r of plan.rows) {
     if (r.action === 'drop') dropped.push(r)
-    else if (r.action === 'pick') groups.push({ pick: r, members: [] })
+    else if (r.action === 'pick' || r.action === 'edit') groups.push({ pick: r, members: [] })
     else groups[groups.length - 1].members.push(r)
   }
   const original = new Map(
@@ -153,6 +155,18 @@ export async function rebaseRewrite(
   mkdirSync(dir, { recursive: true })
   const todoPath = join(dir, 'todo')
   writeFileSync(todoPath, buildTodo(dir, groups, dropped, original, plan))
+  const run: RunRecord = {
+    dir,
+    branch,
+    oldTip: range.tipSha,
+    baseSha: range.baseSha,
+    picks: groups.map((g) => g.pick.sha),
+    firstRow: plan.rows[0].sha,
+    rowCount: range.rows.length,
+    backupRef
+  }
+  writeFileSync(join(dir, 'run.json'), JSON.stringify(run))
+  writeFileSync(join(root, ACTIVE_RUN), dir)
 
   const args = [
     'rebase',
@@ -171,56 +185,164 @@ export async function rebaseRewrite(
     env: { GIT_SEQUENCE_EDITOR: `cp ${shQuote(todoPath)}`, GIT_EDITOR: 'true' }
   })
 
+  // git exits 0 when it pauses at an `edit` line, so always look at the repository state.
+  const after = (await getStatus(cwd)).op
+  if (after.kind === 'rebase') return stoppedResult(run, after, r.stderr)
   if (r.code !== 0) {
-    const after = await detectOp(cwd, [])
-    if (after.kind === 'rebase') {
-      return {
-        engine: 'rebase',
-        status: 'conflict',
-        branch,
-        oldTip: range.tipSha,
-        newTip: null,
-        mapping: [],
-        backupRef,
-        staleRefs: [],
-        message:
-          'The rebase stopped (usually a conflict). Resolve the files, stage them, then Continue, or Abort to undo.\n' +
-          r.stderr.trim()
-      }
-    }
+    clearActiveRun(root, dir)
     // The rebase never started: undo the branch we created so the user can retry.
     if (plan.output.mode === 'new-branch' && (await currentBranch(cwd)) !== branch) {
       await git(cwd, ['branch', '-D', branch], { write: true, allowFail: true })
     }
     throw new Error(r.stderr.trim() || 'git rebase failed')
   }
-  rmSync(dir, { recursive: true, force: true })
+  return finishRun(cwd, run)
+}
 
-  const newTip = await gitOut(cwd, ['rev-parse', `refs/heads/${branch}`])
+/* ---------------- runs that pause (edit stops, conflicts) ---------------- */
+
+/** What is needed to report a History-editor rebase once it finishes (possibly much later). */
+interface RunRecord {
+  dir: string
+  branch: string
+  oldTip: string
+  baseSha: string | null
+  /** SHAs of the group heads (pick/edit), oldest first. */
+  picks: string[]
+  firstRow: string
+  rowCount: number
+  backupRef: string | null
+}
+
+/** File in <git-dir>/git-pro naming the run directory of the rebase in progress. */
+const ACTIVE_RUN = 'active-rebase'
+
+function clearActiveRun(root: string, dir: string): void {
+  rmSync(dir, { recursive: true, force: true })
+  try {
+    if (readFileSync(join(root, ACTIVE_RUN), 'utf8') === dir) rmSync(join(root, ACTIVE_RUN))
+  } catch {
+    // no pointer
+  }
+}
+
+/** The History-editor run behind the rebase in progress, if this rebase is one. */
+async function activeRun(cwd: string): Promise<RunRecord | null> {
+  const dir = await gitDir(cwd)
+  const root = join(dir, 'git-pro')
+  try {
+    const runDir = readFileSync(join(root, ACTIVE_RUN), 'utf8')
+    const run = JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf8')) as RunRecord
+    const head = readFileSync(join(dir, 'rebase-merge', 'head-name'), 'utf8').trim()
+    if (head === `refs/heads/${run.branch}`) return run
+    clearActiveRun(root, runDir) // left over from a rebase finished or aborted elsewhere
+  } catch {
+    // none
+  }
+  return null
+}
+
+function stoppedResult(run: RunRecord, op: OpState, stderr: string): RewriteResult {
+  const editing = op.rebaseStop === 'edit'
+  return {
+    engine: 'rebase',
+    status: editing ? 'paused' : 'conflict',
+    branch: run.branch,
+    oldTip: run.oldTip,
+    newTip: null,
+    mapping: [],
+    backupRef: run.backupRef,
+    staleRefs: [],
+    message: editing
+      ? `Stopped at ${op.stoppedSha?.slice(0, 8) ?? 'the commit'} to edit it. Change files, stage them, then Continue to amend the commit.`
+      : 'The rebase stopped (usually a conflict). Resolve the files, stage them, then Continue, or Abort to undo.\n' +
+        stderr.trim()
+  }
+}
+
+/** Reports a completed run: the new tip, old → new mapping and refs left on the old history. */
+async function finishRun(cwd: string, run: RunRecord): Promise<RewriteResult> {
+  clearActiveRun(join(await gitDir(cwd), 'git-pro'), run.dir)
+  const newTip = await gitOut(cwd, ['rev-parse', `refs/heads/${run.branch}`])
   const newList = (
-    await gitOut(cwd, [
-      'rev-list',
-      '--reverse',
-      range.baseSha ? `${range.baseSha}..${newTip}` : newTip
-    ])
+    await gitOut(cwd, ['rev-list', '--reverse', run.baseSha ? `${run.baseSha}..${newTip}` : newTip])
   )
     .split('\n')
     .filter(Boolean)
   const mapping =
-    newList.length === groups.length
-      ? groups.map((g, i) => ({ old: g.pick.sha, new: newList[i] })).filter((m) => m.old !== m.new)
+    newList.length === run.picks.length
+      ? run.picks.map((old, i) => ({ old, new: newList[i] })).filter((m) => m.old !== m.new)
       : []
-  const firstChanged = mapping[0]?.old ?? plan.rows[0].sha
-  const staleRefs = await refsContaining(cwd, [firstChanged], [`refs/heads/${branch}`])
+  const firstChanged = mapping[0]?.old ?? run.firstRow
+  const staleRefs = await refsContaining(cwd, [firstChanged], [`refs/heads/${run.branch}`])
   return {
     engine: 'rebase',
     status: 'done',
-    branch,
-    oldTip: range.tipSha,
+    branch: run.branch,
+    oldTip: run.oldTip,
     newTip,
     mapping,
-    backupRef,
+    backupRef: run.backupRef,
     staleRefs,
-    message: `Rebased ${branch}: ${range.rows.length} → ${newList.length} commits`
+    message: `Rebased ${run.branch}: ${run.rowCount} → ${newList.length} commits`
   }
+}
+
+function rebaseStep(dir: string): string | null {
+  try {
+    return readFileSync(join(dir, 'rebase-merge', 'msgnum'), 'utf8').trim()
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Continue (or skip) the operation in progress. For a rebase started by the History editor,
+ * returns the finished rewrite once the last step completes; otherwise null.
+ */
+export async function stepOperation(
+  cwd: string,
+  action: 'continue' | 'skip'
+): Promise<RewriteResult | null> {
+  const op = await detectOp(cwd, [])
+  if (op.kind !== 'rebase') {
+    if (action === 'continue') await continueOp(cwd)
+    else await skipOp(cwd)
+    return null
+  }
+  const status = await getStatus(cwd)
+  if (
+    action === 'continue' &&
+    (status.op.rebaseStop === 'edit' || status.op.rebaseStop === 'break') &&
+    status.entries.some((e) => !e.untracked && e.worktree !== '.')
+  ) {
+    throw new Error(
+      'You have unstaged changes. Stage what belongs in this commit, stash or discard the rest, then Continue.'
+    )
+  }
+  const run = await activeRun(cwd)
+  const dir = await gitDir(cwd)
+  const before = rebaseStep(dir)
+  const r = await git(cwd, ['rebase', action === 'continue' ? '--continue' : '--skip'], {
+    write: true,
+    allowFail: true,
+    env: NON_INTERACTIVE_EDITOR
+  })
+  const after = (await getStatus(cwd)).op
+  if (after.kind === 'rebase') {
+    // Still on the same step: git refused (unresolved conflicts, unstaged changes…).
+    if (r.code !== 0 && rebaseStep(dir) === before) {
+      throw new Error(r.stderr.trim() || r.stdout.trim() || `git rebase --${action} failed`)
+    }
+    return null
+  }
+  if (r.code !== 0) throw new Error(r.stderr.trim() || `git rebase --${action} failed`)
+  return run ? finishRun(cwd, run) : null
+}
+
+/** Aborts the operation in progress and forgets its History-editor run, if any. */
+export async function abortOperation(cwd: string): Promise<void> {
+  const run = (await detectOp(cwd, [])).kind === 'rebase' ? await activeRun(cwd) : null
+  await abortOp(cwd)
+  if (run) clearActiveRun(join(await gitDir(cwd), 'git-pro'), run.dir)
 }

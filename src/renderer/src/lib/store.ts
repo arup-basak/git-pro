@@ -1,9 +1,11 @@
 import type {
   CommandLogEntry,
+  HistoryAction,
   LineSelection,
   MergeSource,
   PushSpec,
   RepoInfo,
+  RewriteResult,
   StashTarget
 } from '@shared/types'
 import { create } from 'zustand'
@@ -37,6 +39,8 @@ export interface HistoryRequest {
   base: { sha: string | null } | { count: number }
   /** Commit to highlight when the editor opens. */
   focus?: string
+  /** Actions to preselect, by SHA (e.g. `edit` for "Edit contents of this commit…"). */
+  preset?: Record<string, HistoryAction>
   nonce: number
 }
 
@@ -49,6 +53,8 @@ interface UiState {
   history: HistoryRequest | null
   push: Partial<PushSpec> | null
   integrate: IntegrateRequest | null
+  /** A finished history rewrite to report (from the History editor or a final Continue). */
+  rewriteResult: RewriteResult | null
   logOpen: boolean
   stashSel: StashTarget | null
   stashDialog: StashDialogRequest | null
@@ -64,6 +70,7 @@ interface UiState {
   openHistory(req: Omit<HistoryRequest, 'nonce'>): void
   openPush(prefill: Partial<PushSpec>): void
   closePush(): void
+  showRewriteResult(r: RewriteResult | null): void
   openIntegrate(req: IntegrateRequest): void
   closeIntegrate(): void
   toggleLog(open?: boolean): void
@@ -87,6 +94,7 @@ export const useUi = create<UiState>((set) => ({
   history: null,
   push: null,
   integrate: null,
+  rewriteResult: null,
   logOpen: false,
   stashSel: null,
   stashDialog: null,
@@ -104,6 +112,7 @@ export const useUi = create<UiState>((set) => ({
       stashSel: null,
       merge: null,
       integrate: null,
+      rewriteResult: null,
       push: null,
       view: 'graph'
     }),
@@ -113,6 +122,7 @@ export const useUi = create<UiState>((set) => ({
   openHistory: (req) => set({ history: { ...req, nonce: Date.now() }, view: 'history' }),
   openPush: (push) => set({ push }),
   closePush: () => set({ push: null }),
+  showRewriteResult: (rewriteResult) => set({ rewriteResult }),
   openIntegrate: (integrate) => set({ integrate }),
   closeIntegrate: () => set({ integrate: null }),
   toggleLog: (open) => set((s) => ({ logOpen: open ?? !s.logOpen })),

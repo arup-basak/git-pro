@@ -124,16 +124,18 @@ Once a repository is open, the **repo name ▾** in the toolbar switches between
 
 Right-click a commit:
 
-| Menu item                            | What it does                                                                                    |
-| ------------------------------------ | ----------------------------------------------------------------------------------------------- |
-| Edit date / author / message…        | Opens the [History editor](#changing-commit-dates-authors-and-messages) starting at this commit |
-| Push this commit to a remote branch… | Opens [Push](#pushing-to-any-branch) with this SHA as the source                                |
-| New branch here… / Tag here…         | Create a branch or tag at this commit                                                           |
-| Check out (detached)…                | `git switch --detach <sha>`                                                                     |
-| Cherry-pick onto _branch_            | `git cherry-pick` (merge commits use `-m 1`)                                                    |
-| Revert…                              | `git revert --no-edit`                                                                          |
-| Reset _branch_ to here…              | soft / mixed / keep / hard; a [backup](#reflog-backups-and-undo) is made first                  |
-| Copy SHA / Copy subject              | Clipboard                                                                                       |
+| Menu item                                                            | What it does                                                                                    |
+| -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Edit date / author / message…                                        | Opens the [History editor](#changing-commit-dates-authors-and-messages) starting at this commit |
+| Edit contents of this commit…                                        | Opens the History editor with this commit set to [`edit`](#changing-what-a-commit-contains)     |
+| Merge this commit into _branch_… / Rebase _branch_ onto this commit… | Opens the [Merge or Rebase dialog](#merging-and-rebasing-branches)                              |
+| Push this commit to a remote branch…                                 | Opens [Push](#pushing-to-any-branch) with this SHA as the source                                |
+| New branch here… / Tag here…                                         | Create a branch or tag at this commit                                                           |
+| Check out (detached)…                                                | `git switch --detach <sha>`                                                                     |
+| Cherry-pick onto _branch_                                            | `git cherry-pick` (merge commits use `-m 1`)                                                    |
+| Revert…                                                              | `git revert --no-edit`                                                                          |
+| Reset _branch_ to here…                                              | soft / mixed / keep / hard; a [backup](#reflog-backups-and-undo) is made first                  |
+| Copy SHA / Copy subject                                              | Clipboard                                                                                       |
 
 ---
 
@@ -236,6 +238,7 @@ In the History editor:
 - **Reorder:** drag a row by its ⋮⋮ handle, or use the ↑/↓ buttons in the expanded row.
 - **Action column:**
   - `pick` keeps the commit.
+  - `edit` keeps the commit but **pauses there so you can change its files** (see below).
   - `squash` folds it into the commit **below** it and keeps both messages.
   - `fixup` folds it in and keeps only the lower commit's message.
   - `drop` removes the commit.
@@ -250,6 +253,17 @@ When you click **Create branch**:
   - Resolve the files, then press **Continue** in the banner.
   - **Skip** drops the commit being replayed. **Abort** returns everything to how it was.
 - Ranges that contain **merge commits** can't be reordered, squashed or dropped. You can still edit their dates, authors and messages.
+
+### Changing what a commit contains
+
+Right-click a commit → **Edit contents of this commit…** (or set its action to `edit` in the History editor), then **Create branch** (or **Rewrite** in place).
+
+1. The rewrite stops right after that commit. The banner reads **Editing _sha subject_**, and your working tree holds the commit's files.
+2. Change files in your editor, then stage what belongs in the commit in **Changes**. You can stage whole files or single lines; untracked files can be added too.
+3. Press **Continue**. The staged changes are folded into the commit, and the rest of the history is replayed on top.
+4. When the last step finishes, the usual result dialog lists the old → new commits.
+
+Continue refuses while unstaged changes are left over: stage them, or stash or discard them, first. Several commits can be set to `edit`; the rewrite stops at each one. **Abort** puts everything back.
 
 ---
 

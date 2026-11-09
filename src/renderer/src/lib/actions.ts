@@ -2,6 +2,7 @@ import { nowGitDate } from '@shared/dates'
 import type {
   AppStash,
   GitDate,
+  HistoryAction,
   LineAction,
   LineSelection,
   ResetMode,
@@ -324,9 +325,14 @@ export async function resetTo(sha: string, branch: string | null): Promise<void>
   await run(() => call('commit.reset', repoId(), sha, v.mode), `Reset to ${short(sha)}`)
 }
 
-export function editHistoryFrom(sha: string, parent: string | null, tip?: string): void {
+export function editHistoryFrom(
+  sha: string,
+  parent: string | null,
+  tip?: string,
+  preset?: Record<string, HistoryAction>
+): void {
   const ui = useUi.getState()
-  ui.openHistory({ tip: tip ?? ui.graphRef ?? 'HEAD', base: { sha: parent }, focus: sha })
+  ui.openHistory({ tip: tip ?? ui.graphRef ?? 'HEAD', base: { sha: parent }, focus: sha, preset })
 }
 
 /* ---------- tags ---------- */
@@ -614,7 +620,15 @@ export async function removeRemote(name: string): Promise<void> {
 /* ---------- in-progress operations ---------- */
 
 export const opContinue = (): Promise<unknown> =>
-  run(() => call('op.continue', repoId()), 'Continued', 'Could not continue')
+  run(
+    async () => {
+      const r = await call('op.continue', repoId())
+      if (r) useUi.getState().showRewriteResult(r)
+      return r
+    },
+    (r) => (r ? null : 'Continued'),
+    'Could not continue'
+  )
 export const opSkip = (): Promise<unknown> => run(() => call('op.skip', repoId()), 'Skipped')
 
 export async function opAbort(kind: string): Promise<void> {

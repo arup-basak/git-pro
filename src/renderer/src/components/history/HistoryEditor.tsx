@@ -5,7 +5,6 @@ import type {
   HistoryRange,
   HistoryRow,
   Person,
-  RewriteResult,
   RowEdit
 } from '@shared/types'
 import { useQuery } from '@tanstack/react-query'
@@ -26,7 +25,6 @@ import { invalidateRepo, showError, useRefs, useRepoId } from '../../lib/queries
 import { useUi, type HistoryRequest } from '../../lib/store'
 import { Button, Checkbox, DateField, Empty, Select, Spinner } from '../ui'
 import { formatOffset, parseOffset } from './dateTools'
-import { RewriteResultDialog } from './RewriteResultDialog'
 
 interface RowState {
   action: HistoryAction
@@ -157,7 +155,9 @@ function Editor({ range, req }: { range: HistoryRange; req: HistoryRequest }) {
   const original = useMemo(() => new Map(range.rows.map((r) => [r.sha, r])), [range])
   const [order, setOrder] = useState<string[]>(() => range.rows.map((r) => r.sha))
   const [state, setState] = useState<Record<string, RowState>>(() =>
-    Object.fromEntries(range.rows.map((r) => [r.sha, { action: 'pick' as HistoryAction }]))
+    Object.fromEntries(
+      range.rows.map((r) => [r.sha, { action: req.preset?.[r.sha] ?? ('pick' as HistoryAction) }])
+    )
   )
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [expanded, setExpanded] = useState<string | null>(req.focus ?? null)
@@ -171,7 +171,6 @@ function Editor({ range, req }: { range: HistoryRange; req: HistoryRequest }) {
   const anySigned = range.rows.some((r) => r.signed)
   const [resign, setResign] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState<RewriteResult | null>(null)
   const [dragSha, setDragSha] = useState<string | null>(null)
   const hasMerges = range.rows.some((r) => r.isMerge)
 
@@ -304,8 +303,14 @@ function Editor({ range, req }: { range: HistoryRange; req: HistoryRequest }) {
           duration: 10000
         })
         ui.setView('changes')
+      } else if (r.status === 'paused') {
+        toast.info('Stopped to edit a commit', {
+          description: 'Change its files and stage them, then Continue from the banner.',
+          duration: 10000
+        })
+        ui.setView('changes')
       } else {
-        setResult(r)
+        ui.showRewriteResult(r)
       }
     } catch (e) {
       showError(e, 'Rewrite failed')
@@ -397,6 +402,7 @@ function Editor({ range, req }: { range: HistoryRange; req: HistoryRequest }) {
                       'h-9 border-b border-line',
                       st.action === 'drop' && 'opacity-40 line-through',
                       (st.action === 'squash' || st.action === 'fixup') && 'bg-panel-2',
+                      st.action === 'edit' && 'bg-edit/[0.07]',
                       selected.has(sha) ? 'bg-accent-strong/15' : 'hover:bg-hover',
                       dragSha === sha && 'opacity-50',
                       req.focus === sha && 'outline outline-1 -outline-offset-1 outline-accent/60'
@@ -439,6 +445,12 @@ function Editor({ range, req }: { range: HistoryRange; req: HistoryRequest }) {
                         onChange={(ev) => patch(sha, { action: ev.target.value as HistoryAction })}
                       >
                         <option value="pick">pick</option>
+                        <option
+                          value="edit"
+                          title="Stop at this commit so you can change its files"
+                        >
+                          edit
+                        </option>
                         <option value="squash" disabled={idx === 0}>
                           squash
                         </option>
@@ -599,7 +611,6 @@ function Editor({ range, req }: { range: HistoryRange; req: HistoryRequest }) {
               : 'Create branch'}
         </Button>
       </div>
-      {result && <RewriteResultDialog result={result} onClose={() => setResult(null)} />}
     </div>
   )
 }

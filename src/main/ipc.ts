@@ -11,7 +11,7 @@ import * as hunks from './git/hunks'
 import * as integrate from './git/integrate'
 import * as log from './git/log'
 import * as merge from './git/merge'
-import * as op from './git/opstate'
+import * as rebase from './git/rebase'
 import * as reflog from './git/reflog'
 import * as remotes from './git/remotes'
 import { GitError, git, setCommandLogSink } from './git/runner'
@@ -178,9 +178,11 @@ const handlers: Handlers = {
   'commit.revert': async (repoId, sha) => commits.revert(repo(repoId), sha),
   'commit.reset': async (repoId, sha, mode) => commits.reset(repo(repoId), sha, mode),
 
-  'op.continue': async (repoId) => op.continueOp(repo(repoId)),
-  'op.abort': async (repoId) => op.abortOp(repo(repoId)),
-  'op.skip': async (repoId) => op.skipOp(repo(repoId)),
+  'op.continue': async (repoId) => rebase.stepOperation(repo(repoId), 'continue'),
+  'op.abort': async (repoId) => rebase.abortOperation(repo(repoId)),
+  'op.skip': async (repoId) => {
+    await rebase.stepOperation(repo(repoId), 'skip')
+  },
 
   'history.range': async (repoId, tip, base) => history.loadRange(repo(repoId), tip, base),
   'history.apply': async (repoId, plan) => history.applyPlan(repo(repoId), plan, progress(repoId)),

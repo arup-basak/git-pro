@@ -111,7 +111,8 @@ export interface GitProApi {
   'commit.revert'(repoId: string, sha: string): Promise<void>
   'commit.reset'(repoId: string, sha: string, mode: ResetMode): Promise<string | null>
 
-  'op.continue'(repoId: string): Promise<void>
+  /** Returns the finished rewrite when this completes a History-editor rebase. */
+  'op.continue'(repoId: string): Promise<RewriteResult | null>
   'op.abort'(repoId: string): Promise<void>
   'op.skip'(repoId: string): Promise<void>
 

@@ -63,11 +63,20 @@ export interface StatusEntry {
 
 export type OpKind = 'none' | 'rebase' | 'merge' | 'cherry-pick' | 'revert' | 'bisect'
 
+/** Why an interactive rebase is paused. */
+export type RebaseStop = 'conflict' | 'edit' | 'break' | 'exec'
+
 export interface OpState {
   kind: OpKind
   conflicted: string[]
   /** Human readable progress, e.g. "rebasing feature (3/7)". */
   detail?: string
+  /** For a paused rebase: what stopped it. */
+  rebaseStop?: RebaseStop
+  /** For an edit stop: the commit being edited (as picked, before any amend). */
+  stoppedSha?: string
+  /** Subject of `stoppedSha`. */
+  stoppedSubject?: string
 }
 
 export interface RepoStatus {
@@ -316,7 +325,8 @@ export interface PushResult {
 
 export type ResetMode = 'soft' | 'mixed' | 'hard' | 'keep'
 
-export type HistoryAction = 'pick' | 'drop' | 'squash' | 'fixup'
+/** `edit` picks the commit, then pauses so its files can be changed before continuing. */
+export type HistoryAction = 'pick' | 'edit' | 'drop' | 'squash' | 'fixup'
 
 export interface HistoryRow {
   sha: string
@@ -370,7 +380,8 @@ export interface HistoryPlan {
 
 export interface RewriteResult {
   engine: 'metadata' | 'rebase'
-  status: 'done' | 'conflict'
+  /** `paused`: stopped at an `edit` commit; `conflict`: stopped on a conflict. */
+  status: 'done' | 'conflict' | 'paused'
   branch: string
   oldTip: string
   newTip: string | null

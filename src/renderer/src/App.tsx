@@ -10,6 +10,7 @@ import { Toolbar } from './components/layout/Toolbar'
 import { Welcome } from './components/layout/Welcome'
 import { MergeEditorView } from './components/merge/MergeEditor'
 import { IntegrateDialog } from './components/dialogs/IntegrateDialog'
+import { RewriteResultDialog } from './components/history/RewriteResultDialog'
 import { PushDialog } from './components/push/PushDialog'
 import { StashSaveDialog } from './components/stash/StashSaveDialog'
 import { StashesView } from './components/stash/StashesView'
@@ -54,6 +55,7 @@ function Workspace() {
       <StatusBar />
       <PushDialog />
       <IntegrateDialog />
+      <RewriteResultHost />
       <StashSaveDialog />
     </div>
   )
@@ -71,4 +73,10 @@ export default function App() {
       <ShortcutsDialog />
     </>
   )
+}
+
+function RewriteResultHost() {
+  const result = useUi((s) => s.rewriteResult)
+  const show = useUi((s) => s.showRewriteResult)
+  return result ? <RewriteResultDialog result={result} onClose={() => show(null)} /> : null
 }

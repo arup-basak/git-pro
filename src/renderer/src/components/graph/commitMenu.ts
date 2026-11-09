@@ -26,6 +26,11 @@ export function commitMenu(
       onSelect: () => editHistoryFrom(c.sha, parent, tipHint)
     },
     {
+      label: 'Edit contents of this commit…',
+      disabled: c.parents.length > 1,
+      onSelect: () => editHistoryFrom(c.sha, parent, tipHint, { [c.sha]: 'edit' })
+    },
+    {
       label: 'Push this commit to a remote branch…',
       onSelect: () => ui.openPush({ sourceKind: 'commit', source: c.sha })
     },

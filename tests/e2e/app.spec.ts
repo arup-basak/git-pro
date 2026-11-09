@@ -349,3 +349,34 @@ test('merges a branch and rebases onto another from the sidebar menu', async () 
   expect(git(repoDir, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('main-rebased')
   git(repoDir, 'switch', '-q', 'main')
 })
+
+test('edits what a commit contains through the History editor', async () => {
+  commit('edit-me.txt', 'version 1\n', 'edit me', 1_700_060_000)
+  commit('after.txt', 'after\n', 'after the edit', 1_700_060_100)
+  await page.locator('aside').getByText('All commits', { exact: true }).click()
+  // Wait for the refresh that follows the commits (and the switch back to main) above.
+  await expect(page.getByText('after the edit', { exact: true }).first()).toBeVisible()
+  await expect(page.getByTitle('Current branch')).toHaveText('main')
+  await page.getByText('edit me', { exact: true }).first().click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Edit contents of this commit…' }).click()
+  const sha = git(repoDir, 'rev-parse', 'HEAD~1')
+  await expect(page.locator(`#hrow-${sha} select`).first()).toHaveValue('edit')
+  await page.getByRole('button', { name: 'Create branch', exact: true }).click()
+
+  // The rebase pauses at the commit; the banner says which one.
+  await expect(page.getByText(/^Editing \w+ edit me$/)).toBeVisible()
+  await shot('17-editing-commit')
+  writeFileSync(join(repoDir, 'edit-me.txt'), 'version 2\n')
+  git(repoDir, 'add', 'edit-me.txt')
+  await page.getByRole('button', { name: 'Continue', exact: true }).click()
+
+  await expect(
+    page.getByRole('heading', { name: /Rebased main-edited-.*2 → 2 commits/ })
+  ).toBeVisible()
+  const branch = git(repoDir, 'rev-parse', '--abbrev-ref', 'HEAD')
+  expect(git(repoDir, 'show', `${branch}~1:edit-me.txt`)).toBe('version 2')
+  expect(git(repoDir, 'log', '-1', '--format=%s', branch)).toBe('after the edit')
+  expect(git(repoDir, 'show', 'main~1:edit-me.txt')).toBe('version 1')
+  await page.keyboard.press('Escape')
+  git(repoDir, 'switch', '-q', 'main')
+})
