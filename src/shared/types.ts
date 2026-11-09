@@ -1,3 +1,5 @@
+import type { MenuCommand } from './menu'
+
 /** A git timestamp exactly as git stores it: unix seconds plus a "+hhmm"/"-hhmm" offset. */
 export interface GitDate {
   ts: number
@@ -371,3 +373,4 @@ export type AppEvent =
   | { type: 'repo-changed'; repoId: string; scope: 'refs' | 'worktree' }
   | { type: 'command'; entry: CommandLogEntry }
   | { type: 'progress'; repoId: string; line: string }
+  | { type: 'menu'; command: MenuCommand; arg?: string }

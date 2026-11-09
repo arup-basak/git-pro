@@ -1,13 +1,15 @@
 import type { MergeResolution, MergeVersions } from '@shared/types'
 import { useQuery } from '@tanstack/react-query'
 import { Check, ChevronDown, ChevronUp, FileWarning, X } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { queryClient } from '../../lib/actions'
 import { call } from '../../lib/api'
 import { cx } from '../../lib/format'
+import { langFromPath } from '../../lib/highlight'
 import { invalidateRepo, showError, useRepoId, useStatus } from '../../lib/queries'
 import { useUi, type MergeRequest } from '../../lib/store'
+import { CodeEditor, CodeView } from '../code/Code'
 import { Button, Empty, Spinner } from '../ui'
 import {
   compose,
@@ -20,34 +22,32 @@ import {
 
 type Tab = 'result' | 'ours' | 'theirs' | 'base'
 
-function Code({ text, className }: { text: string; className?: string }) {
+/** Language of the file being merged, for syntax highlighting of every block. */
+const LangCtx = createContext<string | null>(null)
+
+function Code({ text, className, dim }: { text: string; className?: string; dim?: boolean }) {
+  const lang = useContext(LangCtx)
   return (
-    <pre
-      className={cx(
-        'mono m-0 px-3 py-1 leading-[19px] whitespace-pre-wrap break-all select-text',
-        className
-      )}
-    >
-      {text || ' '}
-    </pre>
+    <div className={cx('overflow-x-auto', className)}>
+      <CodeView text={text || ' '} lang={lang} dim={dim} />
+    </div>
   )
 }
 
 function TextBlock({ text }: { text: string }) {
   const [open, setOpen] = useState(false)
   const lines = text.split('\n')
-  if (lines.length <= 14 || open)
-    return <Code text={text.replace(/\n$/, '')} className="text-muted" />
+  if (lines.length <= 14 || open) return <Code text={text.replace(/\n$/, '')} dim />
   return (
     <>
-      <Code text={lines.slice(0, 4).join('\n')} className="text-muted" />
+      <Code text={lines.slice(0, 4).join('\n')} dim />
       <button
         onClick={() => setOpen(true)}
         className="mono w-full bg-panel-2 py-0.5 text-center text-[11px] text-faint hover:text-fg"
       >
         ⋯ {lines.length - 8} unchanged lines
       </button>
-      <Code text={lines.slice(-4).join('\n').replace(/\n$/, '')} className="text-muted" />
+      <Code text={lines.slice(-4).join('\n').replace(/\n$/, '')} dim />
     </>
   )
 }
@@ -79,6 +79,7 @@ function ConflictBlock({
   innerRef: (el: HTMLDivElement | null) => void
 }) {
   const resolved = resolvedText(seg)
+  const lang = useContext(LangCtx)
   const choose = (choice: Choice): void =>
     onChange({
       ...seg,
@@ -128,11 +129,12 @@ function ConflictBlock({
         )}
       </div>
       {seg.choice === 'custom' ? (
-        <textarea
-          className="mono block w-full resize-y border-0 bg-bg px-3 py-1 leading-[19px] text-fg outline-none"
+        <CodeEditor
+          lang={lang}
+          autoFocus
           rows={Math.min(24, Math.max(3, seg.custom.split('\n').length + 1))}
           value={seg.custom}
-          onChange={(e) => onChange({ ...seg, custom: e.target.value })}
+          onChange={(v) => onChange({ ...seg, custom: v })}
         />
       ) : resolved !== null ? (
         <Code text={resolved.replace(/\n$/, '')} className="bg-ok/5" />
@@ -149,7 +151,7 @@ function ConflictBlock({
           {seg.base !== null && (
             <div className="col-span-2 border-t border-line">
               <div className="px-3 pt-1 text-[10px] tracking-wide text-faint uppercase">Base</div>
-              <Code text={seg.base.replace(/\n$/, '')} className="text-faint" />
+              <Code text={seg.base.replace(/\n$/, '')} dim />
             </div>
           )}
         </div>
@@ -169,6 +171,7 @@ function FileMerge({
 }) {
   const repoId = useRepoId()
   const readOnly = req.source.kind !== 'live'
+  const lang = langFromPath(versions.path)
   const [segs, setSegs] = useState<Segment[]>(() => parseConflicts(versions.merged ?? ''))
   const [tab, setTab] = useState<Tab>('result')
   const [manual, setManual] = useState<string | null>(null)
@@ -232,144 +235,155 @@ function FileMerge({
 
   let ci = -1
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-line px-2">
-        {(['result', 'ours', 'theirs', 'base'] as Tab[]).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={cx(
-              'h-7 rounded px-2.5 text-xs',
-              tab === t ? 'bg-line text-fg' : 'text-muted hover:text-fg'
-            )}
-          >
-            {t === 'result'
-              ? 'Result'
-              : t === 'ours'
-                ? 'Current'
-                : t === 'theirs'
-                  ? 'Incoming'
-                  : 'Base'}
-          </button>
-        ))}
-        <div className="flex-1" />
-        {tab === 'result' && manual === null && (
-          <>
-            <span className={cx('mr-2 text-xs', unresolved ? 'text-warn' : 'text-ok')}>
-              {unresolved
-                ? `${unresolved} unresolved`
-                : conflicts.length
-                  ? 'All resolved'
-                  : 'No conflict markers'}
-            </span>
-            <Button
-              size="sm"
-              variant="ghost"
-              icon={<ChevronUp size={12} />}
-              onClick={() => jump(-1)}
-              disabled={!conflicts.length}
-            />
-            <Button
-              size="sm"
-              variant="ghost"
-              icon={<ChevronDown size={12} />}
-              onClick={() => jump(1)}
-              disabled={!conflicts.length}
-            />
-          </>
-        )}
-        {!readOnly && tab === 'result' && (
-          <>
-            {conflicts.length > 0 && manual === null && (
-              <>
-                <Button
-                  size="sm"
-                  onClick={() =>
-                    setSegs((s) =>
-                      s.map((x) => (x.kind === 'conflict' ? { ...x, choice: 'ours' } : x))
-                    )
-                  }
-                >
-                  All current
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={() =>
-                    setSegs((s) =>
-                      s.map((x) => (x.kind === 'conflict' ? { ...x, choice: 'theirs' } : x))
-                    )
-                  }
-                >
-                  All incoming
-                </Button>
-              </>
-            )}
-            <Button
-              size="sm"
-              variant={manual !== null ? 'default' : 'ghost'}
-              onClick={() => setManual(manual === null ? text : null)}
+    <LangCtx.Provider value={lang}>
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="flex h-9 shrink-0 items-center gap-1 border-b border-line px-2">
+          {(['result', 'ours', 'theirs', 'base'] as Tab[]).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={cx(
+                'h-7 rounded px-2.5 text-xs',
+                tab === t ? 'bg-line text-fg' : 'text-muted hover:text-fg'
+              )}
             >
-              {manual === null ? 'Edit as text' : 'Back to blocks'}
-            </Button>
-          </>
-        )}
-      </div>
-      <div className="min-h-0 flex-1 overflow-auto bg-bg">
-        {tab === 'ours' && <Code text={versions.ours ?? '(file does not exist on this side)'} />}
-        {tab === 'theirs' && (
-          <Code text={versions.theirs ?? '(file does not exist on this side)'} />
-        )}
-        {tab === 'base' && <Code text={versions.base ?? '(no common ancestor version)'} />}
-        {tab === 'result' &&
-          (manual !== null ? (
-            <textarea
-              className="mono h-full w-full resize-none border-0 bg-bg px-3 py-2 leading-[19px] text-fg outline-none"
-              value={manual}
-              onChange={(e) => setManual(e.target.value)}
-            />
-          ) : (
-            segs.map((s, i) => {
-              if (s.kind === 'text') return <TextBlock key={i} text={s.text} />
-              ci++
-              const idx = ci
-              return (
-                <ConflictBlock
-                  key={i}
-                  seg={s}
-                  index={idx}
-                  total={conflicts.length}
-                  readOnly={readOnly}
-                  innerRef={(el) => (blockRefs.current[idx] = el)}
-                  onChange={(next) => setSegs((all) => all.map((x, j) => (j === i ? next : x)))}
-                />
-              )
-            })
+              {t === 'result'
+                ? 'Result'
+                : t === 'ours'
+                  ? 'Current'
+                  : t === 'theirs'
+                    ? 'Incoming'
+                    : 'Base'}
+            </button>
           ))}
-      </div>
-      {!readOnly && (
-        <div className="flex h-11 shrink-0 items-center gap-2 border-t border-line px-3">
-          <span className="text-xs text-faint">
-            Saving writes the result to the file and stages it (git add).
-          </span>
           <div className="flex-1" />
-          <Button onClick={() => save({ take: 'ours' })} disabled={saving}>
-            Take current file
-          </Button>
-          <Button onClick={() => save({ take: 'theirs' })} disabled={saving}>
-            Take incoming file
-          </Button>
-          <Button
-            variant="primary"
-            icon={<Check size={13} />}
-            disabled={saving || (manual === null && unresolved > 0)}
-            onClick={() => save({ content: manual ?? text })}
-          >
-            Save &amp; mark resolved
-          </Button>
+          {tab === 'result' && manual === null && (
+            <>
+              <span className={cx('mr-2 text-xs', unresolved ? 'text-warn' : 'text-ok')}>
+                {unresolved
+                  ? `${unresolved} unresolved`
+                  : conflicts.length
+                    ? 'All resolved'
+                    : 'No conflict markers'}
+              </span>
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={<ChevronUp size={12} />}
+                onClick={() => jump(-1)}
+                disabled={!conflicts.length}
+              />
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={<ChevronDown size={12} />}
+                onClick={() => jump(1)}
+                disabled={!conflicts.length}
+              />
+            </>
+          )}
+          {!readOnly && tab === 'result' && (
+            <>
+              {conflicts.length > 0 && manual === null && (
+                <>
+                  <Button
+                    size="sm"
+                    onClick={() =>
+                      setSegs((s) =>
+                        s.map((x) => (x.kind === 'conflict' ? { ...x, choice: 'ours' } : x))
+                      )
+                    }
+                  >
+                    All current
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() =>
+                      setSegs((s) =>
+                        s.map((x) => (x.kind === 'conflict' ? { ...x, choice: 'theirs' } : x))
+                      )
+                    }
+                  >
+                    All incoming
+                  </Button>
+                </>
+              )}
+              <Button
+                size="sm"
+                variant={manual !== null ? 'default' : 'ghost'}
+                onClick={() => setManual(manual === null ? text : null)}
+              >
+                {manual === null ? 'Edit as text' : 'Back to blocks'}
+              </Button>
+            </>
+          )}
         </div>
-      )}
-    </div>
+        <div className="min-h-0 flex-1 overflow-auto bg-bg">
+          {tab !== 'result' && (
+            <FullFile
+              text={
+                tab === 'ours' ? versions.ours : tab === 'theirs' ? versions.theirs : versions.base
+              }
+              missing={
+                tab === 'base'
+                  ? '(no common ancestor version)'
+                  : '(file does not exist on this side)'
+              }
+            />
+          )}
+          {tab === 'result' &&
+            (manual !== null ? (
+              <CodeEditor lang={lang} className="h-full" value={manual} onChange={setManual} />
+            ) : (
+              segs.map((s, i) => {
+                if (s.kind === 'text') return <TextBlock key={i} text={s.text} />
+                ci++
+                const idx = ci
+                return (
+                  <ConflictBlock
+                    key={i}
+                    seg={s}
+                    index={idx}
+                    total={conflicts.length}
+                    readOnly={readOnly}
+                    innerRef={(el) => (blockRefs.current[idx] = el)}
+                    onChange={(next) => setSegs((all) => all.map((x, j) => (j === i ? next : x)))}
+                  />
+                )
+              })
+            ))}
+        </div>
+        {!readOnly && (
+          <div className="flex h-11 shrink-0 items-center gap-2 border-t border-line px-3">
+            <span className="text-xs text-faint">
+              Saving writes the result to the file and stages it (git add).
+            </span>
+            <div className="flex-1" />
+            <Button onClick={() => save({ take: 'ours' })} disabled={saving}>
+              Take current file
+            </Button>
+            <Button onClick={() => save({ take: 'theirs' })} disabled={saving}>
+              Take incoming file
+            </Button>
+            <Button
+              variant="primary"
+              icon={<Check size={13} />}
+              disabled={saving || (manual === null && unresolved > 0)}
+              onClick={() => save({ content: manual ?? text })}
+            >
+              Save &amp; mark resolved
+            </Button>
+          </div>
+        )}
+      </div>
+    </LangCtx.Provider>
   )
+}
+
+function FullFile({ text, missing }: { text: string | null; missing: string }) {
+  const lang = useContext(LangCtx)
+  if (text === null) return <Empty>{missing}</Empty>
+  return <CodeView text={text} lang={lang} lineNumbers className="bg-bg" />
 }
 
 export function MergeEditorView() {

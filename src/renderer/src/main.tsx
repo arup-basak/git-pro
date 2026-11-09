@@ -15,7 +15,7 @@ createRoot(document.getElementById('root')!).render(
         theme="dark"
         position="bottom-left"
         offset={{ bottom: 32, left: 8 }}
-        style={{ ['--width' as string]: '300px' }}
+        style={{ ['--width' as string]: '238px' }}
         toastOptions={{
           style: {
             background: '#161a21',

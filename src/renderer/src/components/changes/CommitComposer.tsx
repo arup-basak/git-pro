@@ -2,7 +2,7 @@ import { nowGitDate } from '@shared/dates'
 import type { GitDate } from '@shared/types'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronDown, ChevronRight } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { run } from '../../lib/actions'
 import { call } from '../../lib/api'
 import { short } from '../../lib/format'
@@ -43,6 +43,13 @@ export function CommitComposer({ stagedCount }: { stagedCount: number }) {
     }
   }
 
+  // Menu → Changes → Amend Last Commit… dispatches this event.
+  useEffect(() => {
+    const onAmend = (): void => void toggleAmend(true)
+    window.addEventListener('gitpro:amend', onAmend)
+    return () => window.removeEventListener('gitpro:amend', onAmend)
+  })
+
   const canCommit = !!message.trim() && (stagedCount > 0 || amend || allowEmpty) && !busy
 
   const submit = async (): Promise<void> => {
@@ -72,6 +79,7 @@ export function CommitComposer({ stagedCount }: { stagedCount: number }) {
   return (
     <div className="shrink-0 border-t border-line bg-panel p-2">
       <textarea
+        data-commit-message
         className="field h-[84px] w-full resize-none py-1.5 leading-snug"
         placeholder={`Commit message${refs.data?.currentBranch ? ` (on ${refs.data.currentBranch})` : ''}\n\nBody…`}
         value={message}

@@ -18,6 +18,7 @@ import * as tags from './git/tags'
 import { assertSafe, gitDir } from './git/util'
 import * as wt from './git/worktree'
 import { addRecent, loadSettings, removeRecent } from './store'
+import { updateMenuState } from './menu'
 import { RepoWatcher } from './watcher'
 
 /** Repos the user explicitly opened (dialog / recent list). Renderer calls may only target these. */
@@ -79,6 +80,7 @@ type Handlers = {
 }
 
 const handlers: Handlers = {
+  'app.menuState': async (state) => updateMenuState(state),
   'repo.pick': async () => {
     const dir = await pickDirectory('Open Git repository')
     return dir ? openRepo(dir) : null

@@ -1,5 +1,6 @@
 import { ChangesView } from './components/changes/ChangesView'
 import { DialogHost } from './components/dialogs/DialogHost'
+import { ShortcutsDialog } from './components/dialogs/ShortcutsDialog'
 import { GraphView } from './components/graph/CommitGraph'
 import { HistoryEditorView } from './components/history/HistoryEditor'
 import { CommandLog, StatusBar } from './components/layout/CommandLog'
@@ -13,6 +14,7 @@ import { StashSaveDialog } from './components/stash/StashSaveDialog'
 import { StashesView } from './components/stash/StashesView'
 import { BackupsView } from './components/views/BackupsView'
 import { ReflogView } from './components/views/ReflogView'
+import { useMenuCommands, useMenuState } from './lib/menuBridge'
 import { useAppEvents } from './lib/queries'
 import { useUi } from './lib/store'
 
@@ -57,11 +59,14 @@ function Workspace() {
 
 export default function App() {
   useAppEvents()
+  useMenuState()
+  useMenuCommands()
   const repo = useUi((s) => s.repo)
   return (
     <>
       {repo ? <Workspace key={repo.id} /> : <Welcome />}
       <DialogHost />
+      <ShortcutsDialog />
     </>
   )
 }

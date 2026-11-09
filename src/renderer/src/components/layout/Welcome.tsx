@@ -3,13 +3,17 @@ import { FolderGit2, FolderOpen, FolderPlus, GitBranchPlus, X } from 'lucide-rea
 import { call } from '../../lib/api'
 import { useOpenRepo } from '../../lib/useOpenRepo'
 import { Button } from '../ui'
+import { ViewSettingsButton } from './ViewSettings'
 
 export function Welcome() {
   const open = useOpenRepo()
   const qc = useQueryClient()
   const recent = useQuery({ queryKey: ['recent'], queryFn: () => call('repo.recent') })
   return (
-    <div className="flex h-full items-center justify-center">
+    <div className="relative flex h-full items-center justify-center">
+      <div className="absolute top-3 right-3">
+        <ViewSettingsButton />
+      </div>
       <div className="w-[560px]">
         <div className="mb-6 flex items-center gap-3">
           <FolderGit2 size={30} className="text-accent" />

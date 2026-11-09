@@ -27,6 +27,7 @@ import type {
   MergeResolution,
   GitDate
 } from './types'
+import type { MenuState } from './menu'
 
 export interface LogQuery {
   /** Ref to walk from; omitted means all branches, remotes and tags. */
@@ -42,6 +43,9 @@ export interface LogQuery {
  * opened through a dialog (or the recent list built from those).
  */
 export interface GitProApi {
+  /** Renderer → main: current UI state for the application menu. */
+  'app.menuState'(state: MenuState): Promise<void>
+
   'repo.pick'(): Promise<RepoInfo | null>
   'repo.openRecent'(path: string): Promise<RepoInfo>
   'repo.recent'(): Promise<string[]>

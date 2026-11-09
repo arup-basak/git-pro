@@ -42,3 +42,8 @@ export function removeRecent(path: string): void {
   s.recent = s.recent.filter((p) => p !== path)
   save()
 }
+
+export function clearRecent(): void {
+  loadSettings().recent = []
+  save()
+}

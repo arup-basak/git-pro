@@ -180,3 +180,71 @@ test('previews a conflicting stash and resolves it in the merge editor', async (
   expect(readFileSync(join(repoDir, 'c.txt'), 'utf8')).toBe('one\nCOMMITTED\nSTASHED\nthree\n')
   expect(git(repoDir, 'diff', '--name-only', '--diff-filter=U')).toBe('')
 })
+
+test('highlights syntax and changed words in diffs, and can be switched off', async () => {
+  writeFileSync(join(repoDir, 'hello.ts'), 'export const greeting: string = "hi"\n// a comment\n')
+  writeFileSync(join(repoDir, 'd.txt'), 'delta prime\n')
+  await page.locator('aside').getByText('Changes', { exact: true }).first().click()
+
+  await page.getByText('hello.ts').first().click()
+  await expect(page.getByText('typescript', { exact: true })).toBeVisible()
+  const colored = page.locator('main td span[style*="color"]')
+  await expect(colored.first()).toBeVisible()
+  expect(await colored.count()).toBeGreaterThan(3)
+  await shot('09-highlighted-diff')
+
+  await page.getByText('d.txt').first().click()
+  await expect(page.locator('main span[class*="bg-ok/30"]', { hasText: 'prime' })).toBeVisible()
+
+  await page.getByText('hello.ts').first().click()
+  await page.getByRole('button', { name: 'View' }).click()
+  await expect(page.getByText('Code display')).toBeVisible()
+  await shot('10-view-settings')
+  await page.getByText('Syntax highlighting', { exact: true }).click()
+  await page.keyboard.press('Escape')
+  await expect(page.locator('main td span[style*="color"]')).toHaveCount(0)
+  // Restore the (persisted) setting for the following tests.
+  await page.getByRole('button', { name: 'View' }).click()
+  await page.getByText('Syntax highlighting', { exact: true }).click()
+  await page.keyboard.press('Escape')
+  await expect(page.locator('main td span[style*="color"]').first()).toBeVisible()
+})
+
+test('resolves a TypeScript conflict with the highlighted merge editor', async () => {
+  git(repoDir, 'add', '-A')
+  git(repoDir, 'commit', '-q', '-m', 'checkpoint')
+  writeFileSync(
+    join(repoDir, 'hello.ts'),
+    'export const greeting: string = "stashed"\n// a comment\n'
+  )
+  git(repoDir, 'stash', 'push', '-q', '-m', 'ts work')
+  commit(
+    'hello.ts',
+    'export const greeting: string = "committed"\n// a comment\n',
+    'ts change',
+    1_700_030_000
+  )
+
+  await page.locator('aside').getByText('Stashes', { exact: true }).first().click()
+  await page.getByText('ts work').first().click()
+  await page.getByRole('button', { name: 'Apply', exact: true }).first().click()
+  await expect(page.getByText('Conflict 1/1')).toBeVisible()
+  // Both sides of the conflict are syntax highlighted.
+  expect(
+    await page.locator('main span[style*="color"]', { hasText: 'export' }).count()
+  ).toBeGreaterThanOrEqual(2)
+
+  await page.getByRole('button', { name: 'Edit', exact: true }).click()
+  const editor = page.locator('main textarea')
+  await expect(editor).toBeVisible()
+  await editor.fill('export const greeting: string = "merged by hand"\n')
+  await expect(
+    page.locator('main pre span[style*="color"]', { hasText: 'merged by hand' })
+  ).toBeVisible()
+  await shot('11-merge-edit-highlighted')
+  await page.getByRole('button', { name: 'Save & mark resolved' }).click()
+  await expect(page.getByText('Resolved hello.ts')).toBeVisible()
+  expect(readFileSync(join(repoDir, 'hello.ts'), 'utf8')).toBe(
+    'export const greeting: string = "merged by hand"\n// a comment\n'
+  )
+})

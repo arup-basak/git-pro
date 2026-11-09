@@ -33,6 +33,8 @@ interface UiState {
   stashSel: StashTarget | null
   stashDialog: { paths?: string[]; staged?: boolean } | null
   merge: MergeRequest | null
+  settingsOpen: boolean
+  shortcutsOpen: boolean
   commands: CommandLogEntry[]
   progress: string | null
   setRepo(repo: RepoInfo | null): void
@@ -48,6 +50,8 @@ interface UiState {
   closeStashDialog(): void
   openMerge(req: Omit<MergeRequest, 'back'>): void
   closeMerge(): void
+  setSettingsOpen(open: boolean): void
+  setShortcutsOpen(open: boolean): void
   addCommand(entry: CommandLogEntry): void
   clearCommands(): void
   setProgress(line: string | null): void
@@ -64,6 +68,8 @@ export const useUi = create<UiState>((set) => ({
   stashSel: null,
   stashDialog: null,
   merge: null,
+  settingsOpen: false,
+  shortcutsOpen: false,
   commands: [],
   progress: null,
   setRepo: (repo) =>
@@ -92,6 +98,8 @@ export const useUi = create<UiState>((set) => ({
       view: 'merge'
     })),
   closeMerge: () => set((s) => ({ view: s.merge?.back ?? 'changes', merge: null })),
+  setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+  setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
   addCommand: (entry) => set((s) => ({ commands: [...s.commands.slice(-499), entry] })),
   clearCommands: () => set({ commands: [] }),
   setProgress: (progress) => set({ progress })

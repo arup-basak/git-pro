@@ -2,13 +2,12 @@ import type { StatusEntry } from '@shared/types'
 import { useQuery } from '@tanstack/react-query'
 import { Archive, GitMerge, Minus, Plus, Undo2 } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
-import { openLiveMerge, run, stashSave } from '../../lib/actions'
+import { discardChanges, openLiveMerge, run, stashSave } from '../../lib/actions'
 import { call } from '../../lib/api'
 import { cx } from '../../lib/format'
 import { useRepoId, useStatus } from '../../lib/queries'
 import { FileRow } from '../commit/CommitDetails'
 import { DiffView } from '../commit/DiffView'
-import { confirmDialog } from '../../lib/dialogs'
 import { Button, Empty } from '../ui'
 import { CommitComposer } from './CommitComposer'
 
@@ -127,31 +126,7 @@ export function ChangesView() {
   const unstage = (paths: string[]): Promise<unknown> =>
     run(() => call('worktree.unstage', repoId, paths))
   const discard = async (list: StatusEntry[]): Promise<void> => {
-    if (!list.length) return
-    const ok = await confirmDialog({
-      title: `Discard changes in ${list.length} file${list.length === 1 ? '' : 's'}?`,
-      message:
-        list
-          .map((e) => `• ${e.path}${e.untracked ? ' (untracked — will be deleted)' : ''}`)
-          .slice(0, 12)
-          .join('\n') +
-        (list.length > 12 ? `\n… and ${list.length - 12} more` : '') +
-        '\n\nThis cannot be undone. Consider stashing instead.',
-      confirmLabel: 'Discard',
-      danger: true
-    })
-    if (!ok) return
-    await run(
-      () =>
-        call(
-          'worktree.discard',
-          repoId,
-          list.filter((e) => !e.untracked).map((e) => e.path),
-          list.filter((e) => e.untracked).map((e) => e.path)
-        ),
-      'Changes discarded'
-    )
-    setSelected(new Set())
+    if (await discardChanges(list)) setSelected(new Set())
   }
 
   if (status.data && entries.length === 0) {

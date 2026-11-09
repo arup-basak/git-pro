@@ -15,6 +15,7 @@ import { invalidateRepo, useRefs, useStatus } from '../../lib/queries'
 import { useUi } from '../../lib/store'
 import { Button, DropdownButton, type MenuEntry } from '../ui'
 import { useOpenRepo } from '../../lib/useOpenRepo'
+import { ViewSettingsButton } from './ViewSettings'
 
 export function Toolbar() {
   const repo = useUi((s) => s.repo)!
@@ -130,6 +131,7 @@ export function Toolbar() {
       </Button>
 
       <div className="flex-1" />
+      <ViewSettingsButton />
       <Button
         variant="ghost"
         icon={<RefreshCw size={13} />}

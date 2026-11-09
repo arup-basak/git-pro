@@ -1,5 +1,12 @@
 import { nowGitDate } from '@shared/dates'
-import type { AppStash, GitDate, ResetMode, StackStash, StashTarget } from '@shared/types'
+import type {
+  AppStash,
+  GitDate,
+  ResetMode,
+  StackStash,
+  StashTarget,
+  StatusEntry
+} from '@shared/types'
 import { QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { confirmDialog, openForm } from './dialogs'
@@ -46,6 +53,43 @@ export const copy = (text: string, what = 'Copied'): void => {
     description: text.length > 60 ? text.slice(0, 60) + '…' : text,
     duration: 1500
   })
+}
+
+/* ---------- working tree ---------- */
+
+export const stagePaths = (paths: string[]): Promise<unknown> =>
+  run(() => call('worktree.stage', repoId(), paths))
+
+export const unstagePaths = (paths: string[]): Promise<unknown> =>
+  run(() => call('worktree.unstage', repoId(), paths))
+
+/** Confirms, then discards changes (deleting untracked files). Returns true if discarded. */
+export async function discardChanges(list: StatusEntry[]): Promise<boolean> {
+  if (!list.length) return false
+  const ok = await confirmDialog({
+    title: `Discard changes in ${list.length} file${list.length === 1 ? '' : 's'}?`,
+    message:
+      list
+        .map((e) => `• ${e.path}${e.untracked ? ' (untracked — will be deleted)' : ''}`)
+        .slice(0, 12)
+        .join('\n') +
+      (list.length > 12 ? `\n… and ${list.length - 12} more` : '') +
+      '\n\nThis cannot be undone. Consider stashing instead.',
+    confirmLabel: 'Discard',
+    danger: true
+  })
+  if (!ok) return false
+  await run(
+    () =>
+      call(
+        'worktree.discard',
+        repoId(),
+        list.filter((e) => !e.untracked).map((e) => e.path),
+        list.filter((e) => e.untracked).map((e) => e.path)
+      ),
+    'Changes discarded'
+  )
+  return true
 }
 
 /* ---------- branches ---------- */

@@ -197,6 +197,7 @@ export function CommitGraph() {
         <div className="relative">
           <Search size={13} className="absolute top-1/2 left-2 -translate-y-1/2 text-faint" />
           <input
+            data-graph-search
             className="field w-72 pl-7"
             placeholder={
               mode === 'sha'

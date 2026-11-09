@@ -7,6 +7,8 @@ export interface DiffLine {
 
 export interface DiffFile {
   title: string
+  /** Path on the new side (used for language detection). */
+  path: string
   lines: DiffLine[]
   binary: boolean
 }
@@ -26,6 +28,7 @@ export function parsePatch(patch: string): { files: DiffFile[]; truncated: boole
       const m = /^diff --git a\/(.*) b\/(.*)$/.exec(line)
       file = {
         title: m ? (m[1] === m[2] ? m[2] : `${m[1]} → ${m[2]}`) : line,
+        path: m ? (m[2] === 'dev/null' ? m[1] : m[2]) : '',
         lines: [],
         binary: false
       }

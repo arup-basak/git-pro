@@ -13,7 +13,7 @@ import {
   Search,
   Trash2
 } from 'lucide-react'
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   adoptStash,
   applyStash,
@@ -271,6 +271,12 @@ export function StashesView() {
 function StashDetail({ sel, groups }: { sel: Sel; groups: string[] }) {
   const repoId = useRepoId()
   const [tab, setTab] = useState<'changes' | 'preview'>('changes')
+  // Stash → Preview Applying… in the menu bar.
+  useEffect(() => {
+    const onPreview = (): void => setTab('preview')
+    window.addEventListener('gitpro:stash-preview', onPreview)
+    return () => window.removeEventListener('gitpro:stash-preview', onPreview)
+  }, [])
   const [file, setFile] = useState<string | null>(null)
   const sha = sel.stash.sha
   const files = useStashFiles(sha)

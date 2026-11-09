@@ -13,6 +13,9 @@ files:
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
 asarUnpack:
   - resources/**
+extraResources:
+  - from: README.md
+    to: README.md
 mac:
   entitlementsInherit: build/entitlements.mac.plist
   notarize: false
