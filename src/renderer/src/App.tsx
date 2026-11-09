@@ -10,6 +10,7 @@ import { Toolbar } from './components/layout/Toolbar'
 import { Welcome } from './components/layout/Welcome'
 import { MergeEditorView } from './components/merge/MergeEditor'
 import { IntegrateDialog } from './components/dialogs/IntegrateDialog'
+import { DropMenuHost } from './components/DropMenu'
 import { RewriteResultDialog } from './components/history/RewriteResultDialog'
 import { PushDialog } from './components/push/PushDialog'
 import { StashSaveDialog } from './components/stash/StashSaveDialog'
@@ -56,6 +57,7 @@ function Workspace() {
       <PushDialog />
       <IntegrateDialog />
       <RewriteResultHost />
+      <DropMenuHost />
       <StashSaveDialog />
     </div>
   )

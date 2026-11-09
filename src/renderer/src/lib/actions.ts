@@ -12,6 +12,7 @@ import type {
 } from '@shared/types'
 import { QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import type { DropAction } from './dnd'
 import { confirmDialog, openForm } from './dialogs'
 import { call, errorParts } from './api'
 import { short } from './format'
@@ -288,6 +289,74 @@ export async function revertCommit(sha: string): Promise<void> {
       `Reverted ${short(sha)}`,
       'Revert stopped'
     )
+}
+
+/**
+ * Cherry-picks onto a branch that is not checked out (working tree untouched). If that would
+ * conflict, offers to check the branch out and cherry-pick there, where the merge editor helps.
+ */
+export async function cherryPickOnto(sha: string, branch: string): Promise<void> {
+  const id = repoId()
+  try {
+    await call('commit.cherryPickTo', id, sha, branch)
+    toast.success(`Cherry-picked ${short(sha)} onto ${branch}`, {
+      description: 'Your working tree was not touched. The old position is kept in Backups.'
+    })
+  } catch (e) {
+    const { message } = errorParts(e)
+    if (!/conflicts in/.test(message)) {
+      showError(e, 'Could not cherry-pick')
+      return
+    }
+    const ok = await confirmDialog({
+      title: 'This cherry-pick conflicts',
+      message: `${message}.\n\nCheck out ${branch} and cherry-pick there? The conflicts then open in the merge editor.`,
+      confirmLabel: `Check out ${branch}`
+    })
+    if (!ok) return
+    try {
+      await call('branch.checkout', id, branch)
+    } catch (err) {
+      showError(err, `Could not check out ${branch}`)
+      return
+    }
+    await cherryPick(sha)
+  } finally {
+    void invalidateRepo(queryClient, id)
+  }
+}
+
+/** Points a branch that is not checked out at another commit (backed up first). */
+export async function moveBranchTo(branch: string, sha: string): Promise<void> {
+  const ok = await confirmDialog({
+    title: `Move ${branch} to ${short(sha)}?`,
+    message: `${branch} will point at ${short(sha)}. Its current position is kept in Backups, so this can be undone.`,
+    confirmLabel: 'Move branch',
+    danger: true
+  })
+  if (ok) {
+    await run(() => call('branch.move', repoId(), branch, sha), `Moved ${branch} to ${short(sha)}`)
+  }
+}
+
+/** Carries out a choice from the drop menu (drag and drop in the graph and sidebar). */
+export async function runDropAction(a: DropAction): Promise<void> {
+  const ui = useUi.getState()
+  switch (a.kind) {
+    case 'cherry-pick':
+      return a.current ? cherryPick(a.sha) : cherryPickOnto(a.sha, a.branch)
+    case 'move':
+      return a.current ? resetTo(a.sha, a.branch) : moveBranchTo(a.branch, a.sha)
+    case 'rebase':
+      ui.openIntegrate({ kind: 'rebase', branch: a.branch, onto: a.onto })
+      return
+    case 'merge':
+      ui.openIntegrate({ kind: 'merge', source: a.source, target: a.target })
+      return
+    case 'push':
+      ui.openPush({ sourceKind: a.sourceKind, source: a.source, remote: a.remote, dest: a.dest })
+      return
+  }
 }
 
 export async function resetTo(sha: string, branch: string | null): Promise<void> {

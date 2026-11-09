@@ -156,6 +156,7 @@ const handlers: Handlers = {
   'branch.delete': async (repoId, name, force) => branches.deleteBranch(repo(repoId), name, force),
   'branch.setUpstream': async (repoId, name, upstream) =>
     branches.setUpstream(repo(repoId), name, upstream),
+  'branch.move': async (repoId, name, sha) => branches.moveBranch(repo(repoId), name, sha),
   'branch.mergePreview': async (repoId, source, target) =>
     integrate.mergePreview(repo(repoId), source, target),
   'branch.merge': async (repoId, req) => integrate.mergeBranch(repo(repoId), req),
@@ -175,6 +176,8 @@ const handlers: Handlers = {
 
   'commit.checkout': async (repoId, sha) => commits.checkoutDetached(repo(repoId), sha),
   'commit.cherryPick': async (repoId, sha) => commits.cherryPick(repo(repoId), sha),
+  'commit.cherryPickTo': async (repoId, sha, branch) =>
+    commits.cherryPickTo(repo(repoId), sha, branch),
   'commit.revert': async (repoId, sha) => commits.revert(repo(repoId), sha),
   'commit.reset': async (repoId, sha, mode) => commits.reset(repo(repoId), sha, mode),
 

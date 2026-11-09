@@ -2,6 +2,7 @@ import type { CommitSummary, RefLabel } from '@shared/types'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { Search, X } from 'lucide-react'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { dragSource, dropTarget, useDropHover } from '../../lib/dnd'
 import { compactDate, cx, short } from '../../lib/format'
 import { LANE_COLORS, computeLanes, type LaneRow } from '../../lib/lanes'
 import { useLog, useRefs } from '../../lib/queries'
@@ -46,26 +47,47 @@ function GraphCell({ row, width }: { row: LaneRow; width: number }) {
   )
 }
 
+/** One ref badge: draggable, and a drop target for branches and remote branches. */
+function RefBadge({ r }: { r: RefLabel }) {
+  const key = `graph:${r.kind}:${r.name}`
+  const hover = useDropHover(key)
+  const color = r.current
+    ? 'current'
+    : r.kind === 'remote'
+      ? 'remote'
+      : r.kind === 'tag'
+        ? 'tag'
+        : 'branch'
+  const target =
+    r.kind === 'branch'
+      ? dropTarget({ kind: 'branch', name: r.name, current: !!r.current }, key)
+      : r.kind === 'remote'
+        ? dropTarget({ kind: 'remote', short: r.name }, key)
+        : {}
+  return (
+    <Badge
+      color={color}
+      title={
+        r.kind === 'tag'
+          ? undefined
+          : 'Drag onto another branch to merge, rebase or push; drop a commit here to cherry-pick it'
+      }
+      className={cx('cursor-grab', hover && 'ring-1 ring-accent ring-offset-1 ring-offset-bg')}
+      {...dragSource({ kind: 'branch', name: r.name, remote: r.kind !== 'branch' })}
+      {...target}
+    >
+      {r.kind === 'tag' ? `🏷 ${r.name}` : r.name}
+    </Badge>
+  )
+}
+
 function RefBadges({ refs }: { refs: RefLabel[] }) {
   return (
     <>
       {refs
         .filter((r) => r.kind !== 'head')
         .map((r) => (
-          <Badge
-            key={`${r.kind}:${r.name}`}
-            color={
-              r.current
-                ? 'current'
-                : r.kind === 'remote'
-                  ? 'remote'
-                  : r.kind === 'tag'
-                    ? 'tag'
-                    : 'branch'
-            }
-          >
-            {r.kind === 'tag' ? `🏷 ${r.name}` : r.name}
-          </Badge>
+          <RefBadge key={`${r.kind}:${r.name}`} r={r} />
         ))}
       {refs.some((r) => r.kind === 'head') && !refs.some((r) => r.current) && (
         <Badge color="head">HEAD</Badge>
@@ -95,6 +117,7 @@ const Row = memo(function Row({
   return (
     <WithContextMenu entries={() => commitMenu(c, currentBranch, tipHint)}>
       <div
+        {...dragSource({ kind: 'commit', sha: c.sha, subject: c.subject })}
         onMouseDown={() => onSelect(c.sha)}
         className={cx(
           'flex h-[26px] cursor-default items-center gap-2 pr-3',

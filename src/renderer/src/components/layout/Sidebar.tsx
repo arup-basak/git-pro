@@ -33,6 +33,13 @@ import {
   setUpstream,
   stashSave
 } from '../../lib/actions'
+import {
+  dragSource,
+  dropTarget,
+  useDropHover,
+  type DragPayload,
+  type DropTarget
+} from '../../lib/dnd'
 import { cx, relative } from '../../lib/format'
 import { useBackups, useRefs, useStashes, useStatus } from '../../lib/queries'
 import { useUi, type View } from '../../lib/store'
@@ -134,6 +141,30 @@ function NavItem({
         ) : undefined
       }
     />
+  )
+}
+
+/** Makes a sidebar row draggable and a drop target, with a highlight while hovered. */
+function DragDropRow({
+  payload,
+  target,
+  dropKey,
+  children
+}: {
+  payload: DragPayload
+  target: DropTarget
+  dropKey: string
+  children: ReactNode
+}) {
+  const hover = useDropHover(dropKey)
+  return (
+    <div
+      {...dragSource(payload)}
+      {...dropTarget(target, dropKey)}
+      className={cx('rounded', hover && 'bg-accent/10 ring-1 ring-accent ring-inset')}
+    >
+      {children}
+    </div>
   )
 }
 
@@ -256,23 +287,31 @@ export function Sidebar() {
             entries={() => branchMenu(b.name, b.sha, b.upstream, b.current)}
           >
             <div>
-              <Item
-                icon={<GitBranch size={13} className={b.current ? 'text-accent' : 'text-muted'} />}
-                label={<span className={b.current ? 'font-semibold' : ''}>{b.name}</span>}
-                active={ui.view === 'graph' && ui.graphRef === b.name}
-                title={`${b.subject}\n${relative(b.date)}${b.upstream ? `\ntracks ${b.upstream}` : ''}\nDouble-click to check out`}
-                onClick={() => showRef(b.name, b.sha)}
-                onDoubleClick={() => !b.current && void checkoutBranch(b.name)}
-                right={
-                  b.upstream ? (
-                    <span className={cx('text-[11px]', b.gone ? 'text-bad' : 'text-faint')}>
-                      {b.gone
-                        ? 'gone'
-                        : `${b.ahead ? `↑${b.ahead}` : ''}${b.behind ? `↓${b.behind}` : ''}`}
-                    </span>
-                  ) : undefined
-                }
-              />
+              <DragDropRow
+                payload={{ kind: 'branch', name: b.name, remote: false }}
+                target={{ kind: 'branch', name: b.name, current: b.current }}
+                dropKey={`side:branch:${b.name}`}
+              >
+                <Item
+                  icon={
+                    <GitBranch size={13} className={b.current ? 'text-accent' : 'text-muted'} />
+                  }
+                  label={<span className={b.current ? 'font-semibold' : ''}>{b.name}</span>}
+                  active={ui.view === 'graph' && ui.graphRef === b.name}
+                  title={`${b.subject}\n${relative(b.date)}${b.upstream ? `\ntracks ${b.upstream}` : ''}\nDouble-click to check out`}
+                  onClick={() => showRef(b.name, b.sha)}
+                  onDoubleClick={() => !b.current && void checkoutBranch(b.name)}
+                  right={
+                    b.upstream ? (
+                      <span className={cx('text-[11px]', b.gone ? 'text-bad' : 'text-faint')}>
+                        {b.gone
+                          ? 'gone'
+                          : `${b.ahead ? `↑${b.ahead}` : ''}${b.behind ? `↓${b.behind}` : ''}`}
+                      </span>
+                    ) : undefined
+                  }
+                />
+              </DragDropRow>
             </div>
           </WithContextMenu>
         ))}
@@ -352,13 +391,19 @@ export function Sidebar() {
                     ]}
                   >
                     <div className="pl-4">
-                      <Item
-                        icon={<GitBranch size={12} className="text-faint" />}
-                        label={rb.name}
-                        active={ui.view === 'graph' && ui.graphRef === rb.short}
-                        title={`${rb.subject}\n${relative(rb.date)}`}
-                        onClick={() => showRef(rb.short, rb.sha)}
-                      />
+                      <DragDropRow
+                        payload={{ kind: 'branch', name: rb.short, remote: true }}
+                        target={{ kind: 'remote', short: rb.short }}
+                        dropKey={`side:remote:${rb.short}`}
+                      >
+                        <Item
+                          icon={<GitBranch size={12} className="text-faint" />}
+                          label={rb.name}
+                          active={ui.view === 'graph' && ui.graphRef === rb.short}
+                          title={`${rb.subject}\n${relative(rb.date)}`}
+                          onClick={() => showRef(rb.short, rb.sha)}
+                        />
+                      </DragDropRow>
                     </div>
                   </WithContextMenu>
                 ))

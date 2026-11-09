@@ -93,6 +93,8 @@ export interface GitProApi {
   'branch.rename'(repoId: string, oldName: string, newName: string): Promise<void>
   'branch.delete'(repoId: string, name: string, force: boolean): Promise<string | null>
   'branch.setUpstream'(repoId: string, name: string, upstream: string | null): Promise<void>
+  /** Points a branch that is not checked out at another commit; returns the backup ref. */
+  'branch.move'(repoId: string, name: string, sha: string): Promise<string>
   'branch.mergePreview'(repoId: string, source: string, target: string): Promise<MergePreview>
   'branch.merge'(repoId: string, req: BranchMergeRequest): Promise<IntegrateResult>
   'branch.rebasePreview'(repoId: string, branch: string, onto: string): Promise<RebasePreview>
@@ -108,6 +110,12 @@ export interface GitProApi {
 
   'commit.checkout'(repoId: string, sha: string): Promise<void>
   'commit.cherryPick'(repoId: string, sha: string): Promise<void>
+  /** Cherry-pick onto a branch that is not checked out, without touching the working tree. */
+  'commit.cherryPickTo'(
+    repoId: string,
+    sha: string,
+    branch: string
+  ): Promise<{ branch: string; newTip: string; backupRef: string }>
   'commit.revert'(repoId: string, sha: string): Promise<void>
   'commit.reset'(repoId: string, sha: string, mode: ResetMode): Promise<string | null>
 

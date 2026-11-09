@@ -122,6 +122,20 @@ Once a repository is open, the **repo name ▾** in the toolbar switches between
   - the **author and committer, each with their own date and UTC offset**
   - the changed files with `+/-` counts, and a diff that is syntax highlighted
 
+**Drag and drop**
+
+Drag a commit row, or a branch badge, onto a branch badge in the graph or onto a branch in the sidebar. A menu opens where you drop it:
+
+| Drag     | Drop on              | Choices                                                                                                                                      |
+| -------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| a commit | a local branch       | **Cherry-pick onto it**, **Rebase it onto this commit…**, **Move it here…** (or **Reset…** for the checked-out branch)                       |
+| a commit | a remote branch      | **Push this commit to it…**                                                                                                                  |
+| a branch | another local branch | **Merge into it…**, **Rebase onto it…**, **Rebase it onto this branch…** (opens the [Merge / Rebase dialog](#merging-and-rebasing-branches)) |
+| a branch | a remote branch      | **Push to it…**                                                                                                                              |
+
+- Cherry-picking onto a branch that is **not checked out** happens without touching your working tree, and keeps the original author, date and message. If it would conflict, Git Pro offers to check that branch out and cherry-pick there instead, so the merge editor can help.
+- **Move** points a branch that is not checked out at the commit. The old position goes to [Backups](#reflog-backups-and-undo).
+
 Right-click a commit:
 
 | Menu item                                                            | What it does                                                                                    |

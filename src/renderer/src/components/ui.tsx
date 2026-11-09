@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
   type ButtonHTMLAttributes,
+  type HTMLAttributes,
   type ReactNode,
   type SelectHTMLAttributes
 } from 'react'
@@ -89,17 +90,21 @@ export function Select({ className, children, ...rest }: SelectHTMLAttributes<HT
 export function Badge({
   children,
   color = 'default',
-  title
+  title,
+  className,
+  ...rest
 }: {
   children: ReactNode
   color?: 'default' | 'branch' | 'current' | 'remote' | 'tag' | 'head' | 'warn'
   title?: string
-}) {
+} & Omit<HTMLAttributes<HTMLSpanElement>, 'color' | 'title' | 'children'>) {
   return (
     <span
       title={title}
+      {...rest}
       className={cx(
         'inline-flex h-[18px] max-w-[220px] shrink-0 items-center truncate rounded px-1.5 text-[11px] leading-none font-medium',
+        className,
         color === 'default' && 'bg-line text-muted',
         color === 'branch' && 'bg-accent/15 text-accent',
         color === 'current' && 'bg-accent-strong text-white',
@@ -441,5 +446,32 @@ export function SectionTitle({ children, right }: { children: ReactNode; right?:
       <span>{children}</span>
       {right}
     </div>
+  )
+}
+
+/** A dropdown menu opened at a screen position (e.g. where something was dropped). */
+export function PointerMenu({
+  at,
+  entries,
+  onClose
+}: {
+  at: { x: number; y: number }
+  entries: MenuEntry[]
+  onClose: () => void
+}) {
+  return (
+    <Dropdown.Root open onOpenChange={(o) => !o && onClose()}>
+      <Dropdown.Trigger asChild>
+        <span
+          aria-hidden
+          style={{ position: 'fixed', left: at.x, top: at.y, width: 1, height: 1 }}
+        />
+      </Dropdown.Trigger>
+      <Dropdown.Portal>
+        <Dropdown.Content align="start" sideOffset={2} className={menuContent}>
+          <DropdownEntries entries={entries} />
+        </Dropdown.Content>
+      </Dropdown.Portal>
+    </Dropdown.Root>
   )
 }

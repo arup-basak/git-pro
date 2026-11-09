@@ -380,3 +380,23 @@ test('edits what a commit contains through the History editor', async () => {
   await page.keyboard.press('Escape')
   git(repoDir, 'switch', '-q', 'main')
 })
+
+test('drags a commit onto a branch badge to cherry-pick it there', async () => {
+  git(repoDir, 'branch', 'dnd-target', 'main')
+  commit('picked.txt', 'picked\n', 'pick me', 1_700_070_000)
+  await page.locator('aside').getByText('All commits', { exact: true }).click()
+  await expect(page.getByText('pick me', { exact: true }).first()).toBeVisible()
+  const badge = page.locator('main span', { hasText: /^dnd-target$/ }).first()
+  await expect(badge).toBeVisible()
+
+  await page.getByText('pick me', { exact: true }).first().dragTo(badge)
+  const sha = git(repoDir, 'rev-parse', '--short=8', 'main')
+  await expect(
+    page.getByRole('menuitem', { name: `Cherry-pick ${sha} onto dnd-target` })
+  ).toBeVisible()
+  await shot('18-drop-menu')
+  await page.getByRole('menuitem', { name: `Cherry-pick ${sha} onto dnd-target` }).click()
+  await expect(page.getByText(`Cherry-picked ${sha} onto dnd-target`)).toBeVisible()
+  expect(git(repoDir, 'log', '-1', '--format=%s', 'dnd-target')).toBe('pick me')
+  expect(git(repoDir, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('main')
+})

@@ -2,6 +2,8 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { mergeBranch, mergePreview, rebaseOnto, rebasePreview } from '../src/main/git/integrate'
+import { moveBranch } from '../src/main/git/branches'
+import { cherryPickTo } from '../src/main/git/commits'
 import { abortOp, detectOp } from '../src/main/git/opstate'
 import type { BranchMergeRequest, RebaseOntoRequest } from '../src/shared/types'
 import { makeRepo, type TestRepo } from './helpers/tmpRepo'
@@ -180,5 +182,44 @@ describe('rebasing onto another branch', () => {
     writeFileSync(join(repo.dir, 'base.txt'), 'dirty\n')
     await expect(rebaseOnto(repo.dir, rebase({}))).rejects.toThrow(/uncommitted changes/)
     expect(await repo.git(['branch', '--list', 'feature-rebased'])).toBe('')
+  })
+})
+
+describe('cherry-picking onto a branch that is not checked out', () => {
+  it('records the commit on the branch with its author and message, working tree untouched', async () => {
+    await diverged()
+    const pick = await sha('feature~1')
+    const before = await sha('feature')
+    await repo.git(['branch', 'other', 'main~1'])
+    writeFileSync(join(repo.dir, 'm.txt'), 'uncommitted\n')
+    const r = await cherryPickTo(repo.dir, pick, 'other')
+    expect(await sha('other')).toBe(r.newTip)
+    expect(await repo.git(['show', 'other:f.txt'])).toBe('f1')
+    expect(await repo.git(['log', '-1', '--format=%s|%an|%ad', '--date=raw', 'other'])).toBe(
+      await repo.git(['log', '-1', '--format=%s|%an|%ad', '--date=raw', pick])
+    )
+    expect(read('m.txt')).toBe('uncommitted\n')
+    expect(await sha('feature')).toBe(before)
+    expect(r.backupRef).toMatch(/-cherry-pick\/other$/)
+  })
+
+  it('refuses a conflicting pick and the checked-out branch', async () => {
+    await diverged()
+    await repo.commit('f.txt', 'main version\n', 'clash')
+    await repo.git(['branch', 'target'])
+    await repo.git(['switch', '-q', 'feature'])
+    await expect(cherryPickTo(repo.dir, 'feature', 'target')).rejects.toThrow(/conflicts in f\.txt/)
+    await expect(cherryPickTo(repo.dir, 'main', 'feature')).rejects.toThrow(/checked out/)
+  })
+})
+
+describe('moving a branch', () => {
+  it('points a branch at another commit and keeps a backup', async () => {
+    await diverged()
+    const old = await sha('feature')
+    const backup = await moveBranch(repo.dir, 'feature', 'main')
+    expect(await sha('feature')).toBe(await sha('main'))
+    expect(await sha(backup)).toBe(old)
+    await expect(moveBranch(repo.dir, 'main', 'feature')).rejects.toThrow(/checked out/)
   })
 })
