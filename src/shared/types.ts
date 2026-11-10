@@ -298,6 +298,8 @@ export interface CommitRequest {
   signoff: boolean
   noVerify: boolean
   allowEmpty: boolean
+  /** true: sign (-S); false: don't (--no-gpg-sign); undefined: follow commit.gpgsign. */
+  sign?: boolean
 }
 
 export type ForceMode = 'none' | 'lease' | 'force'
@@ -321,6 +323,58 @@ export interface PushResult {
   ok: boolean
   summary: string
   output: string
+}
+
+/* ---------- branch tracking ---------- */
+
+/** Local branches that are not (or no longer) connected to a remote branch, and remote-only branches. */
+export interface TrackingReport {
+  /** Remote new branches are published to by default ("origin" when present). */
+  defaultRemote: string | null
+  /** No upstream and no same-named branch on any remote. */
+  unpublished: BranchInfo[]
+  /** No upstream, but `candidate` (e.g. "origin/feature") exists; counts are local vs candidate. */
+  unlinked: Array<{ branch: BranchInfo; candidate: string; ahead: number; behind: number }>
+  /** The upstream was deleted on the remote. */
+  gone: Array<{ branch: BranchInfo; upstream: string }>
+  /** Remote branches that no local branch tracks or shares a name with. */
+  remoteOnly: RemoteBranchInfo[]
+}
+
+/** Push local `branch` to `<remote>/<dest>` and track it. */
+export interface PublishItem {
+  branch: string
+  dest: string
+}
+
+export interface PublishOutcome extends PublishItem {
+  ok: boolean
+  /** "new branch", "up to date", "rejected (fetch first)", … */
+  status: string
+}
+
+export interface PublishResult {
+  remote: string
+  outcomes: PublishOutcome[]
+  output: string
+}
+
+/** Sets (`upstream` = "origin/x") or removes (`upstream` = null) the upstream of a branch. */
+export interface UpstreamChange {
+  branch: string
+  upstream: string | null
+}
+
+/** Creates local branch `name` tracking remote-tracking branch `remoteBranch` ("origin/x"). */
+export interface LocalTrackingBranch {
+  remoteBranch: string
+  name: string
+}
+
+/** Outcome of a per-branch batch: the branches handled, and the ones that failed with why. */
+export interface BatchResult {
+  done: string[]
+  failed: Array<{ name: string; error: string }>
 }
 
 export type ResetMode = 'soft' | 'mixed' | 'hard' | 'keep'
@@ -408,6 +462,17 @@ export type AppEvent =
   | { type: 'command'; entry: CommandLogEntry }
   | { type: 'progress'; repoId: string; line: string }
   | { type: 'menu'; command: MenuCommand; arg?: string }
+  | { type: 'window'; fullscreen: boolean }
+  | { type: 'terminal-data'; id: string; data: string }
+  | { type: 'terminal-exit'; id: string; exitCode: number }
+
+/** A shell started by the in-app terminal. */
+export interface TerminalInfo {
+  id: string
+  /** e.g. "zsh" */
+  shell: string
+  cwd: string
+}
 
 /* ---------------- merge a branch / rebase onto ---------------- */
 
@@ -486,4 +551,107 @@ export interface IntegrateResult {
   newTip: string | null
   backupRef: string | null
   message: string
+}
+
+/* ---------------- files: blame ---------------- */
+
+export interface BlameCommit {
+  sha: string
+  author: string
+  /** Unix seconds. */
+  authorTime: number
+  summary: string
+  /** The commit and path to blame next to see what the line was before this change. */
+  previous?: { sha: string; path: string }
+}
+
+/** A run of consecutive lines last changed by the same commit. */
+export interface BlameHunk {
+  /** 0-based index of the first line in `lines`. */
+  start: number
+  count: number
+  sha: string
+  /** Line number in that commit's version of the file (1-based). */
+  origLine: number
+  origPath: string
+}
+
+export interface BlameResult {
+  path: string
+  /** Revision blamed; null = the working tree. */
+  rev: string | null
+  lines: string[]
+  hunks: BlameHunk[]
+  commits: Record<string, BlameCommit>
+}
+
+/* ---------------- bisect ---------------- */
+
+export interface BisectState {
+  active: boolean
+  bad: string | null
+  good: string[]
+  skipped: string[]
+  /** The commit checked out for testing. */
+  current: string | null
+  /** Roughly how many more steps are needed. */
+  remaining: number | null
+  /** Commits still suspected. */
+  candidates: number | null
+  /** Set once git has found it. */
+  firstBad: { sha: string; subject: string } | null
+}
+
+/* ---------------- worktrees ---------------- */
+
+export interface WorktreeInfo {
+  path: string
+  head: string | null
+  branch: string | null
+  detached: boolean
+  bare: boolean
+  locked: boolean
+  prunable: boolean
+  /** The worktree this window has open. */
+  current: boolean
+  /** The repository's main worktree. */
+  main: boolean
+}
+
+export interface WorktreeAddRequest {
+  /** Branch to check out; created from `startPoint` when `create` is set. */
+  branch: string
+  create: boolean
+  startPoint?: string
+}
+
+/* ---------------- ignore ---------------- */
+
+export interface IgnoreRequest {
+  pattern: string
+  /** `.gitignore` at the top of the repository, or the unshared `.git/info/exclude`. */
+  target: 'gitignore' | 'exclude'
+  /** Tracked paths to stop tracking (`git rm --cached`) so the pattern takes effect. */
+  untrack: string[]
+}
+
+/* ---------------- signing ---------------- */
+
+export type SigningFormat = 'openpgp' | 'ssh' | 'x509'
+export type ConfigScope = 'local' | 'global'
+
+export interface SigningConfig {
+  format: SigningFormat
+  key: string
+  signCommits: boolean
+  signTags: boolean
+  /** Where `user.signingkey` comes from (null = not set). */
+  keyScope: ConfigScope | 'system' | 'worktree' | 'command' | null
+}
+
+export interface SigningKey {
+  format: SigningFormat
+  /** Value for user.signingkey. */
+  id: string
+  label: string
 }

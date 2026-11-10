@@ -89,14 +89,10 @@ function FormDialog({ spec }: { spec: NonNullable<HostState['form']> }) {
               {f.type === 'select' && (
                 <Select
                   value={String(values[f.name])}
-                  onChange={(e) => set(f.name, e.target.value)}
-                >
-                  {f.options.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </Select>
+                  onChange={(v) => set(f.name, v)}
+                  aria-label={f.label}
+                  options={f.options}
+                />
               )}
               {f.type === 'date' && (
                 <DateField value={values[f.name] as GitDate} onChange={(d) => set(f.name, d)} />

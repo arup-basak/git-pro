@@ -6,6 +6,9 @@ import { createRoot } from 'react-dom/client'
 import { Toaster } from 'sonner'
 import App from './App'
 import { queryClient } from './lib/actions'
+import { initTitlebar } from './lib/titlebar'
+
+initTitlebar()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

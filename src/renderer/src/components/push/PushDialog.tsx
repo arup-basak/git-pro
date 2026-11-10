@@ -9,7 +9,7 @@ import { cx, short } from '../../lib/format'
 import { invalidateRepo, showError, useRefs, useRepoId } from '../../lib/queries'
 import { useUi } from '../../lib/store'
 import { confirmDialog } from '../../lib/dialogs'
-import { Button, Checkbox, Modal, Select } from '../ui'
+import { Button, Checkbox, Combobox, Modal, Select } from '../ui'
 
 export function PushDialog() {
   const prefill = useUi((s) => s.push)
@@ -38,11 +38,16 @@ function PushForm({ prefill }: { prefill: Partial<PushSpec> }) {
       (prefill.sourceKind !== 'commit' ? (prefill.source ?? data?.currentBranch ?? '') : '')
   )
   const [force, setForce] = useState<ForceMode>(prefill.force ?? 'none')
-  const [setUpstream, setSetUpstream] = useState(prefill.setUpstream ?? false)
+  /** null = follow the source: on when the branch has no upstream yet (or it was deleted). */
+  const [upstreamChoice, setUpstreamChoice] = useState<boolean | null>(prefill.setUpstream ?? null)
   const [followTags, setFollowTags] = useState(false)
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<PushResult | null>(null)
   const progress = useUi((s) => s.progress)
+  const sourceInfo =
+    sourceKind === 'branch' ? data?.branches.find((b) => b.name === source.trim()) : undefined
+  const unconnected = !!sourceInfo && (!sourceInfo.upstream || !!sourceInfo.gone)
+  const setUpstream = sourceKind === 'branch' && (upstreamChoice ?? unconnected)
 
   const spec: PushSpec = {
     remote,
@@ -123,24 +128,31 @@ function PushForm({ prefill }: { prefill: Partial<PushSpec> }) {
         <div className="flex min-w-0 gap-2">
           <Select
             value={sourceKind}
-            onChange={(e) => setSourceKind(e.target.value as PushSpec['sourceKind'])}
+            onChange={setSourceKind}
             className="w-36 shrink-0"
-          >
-            <option value="branch">Local branch</option>
-            <option value="commit">Commit / ref</option>
-          </Select>
+            aria-label="Source kind"
+            options={[
+              { value: 'branch', label: 'Local branch' },
+              { value: 'commit', label: 'Commit / ref' }
+            ]}
+          />
           {sourceKind === 'branch' ? (
-            <Select value={source} onChange={(e) => setSource(e.target.value)} className="flex-1">
-              {!data?.branches.some((b) => b.name === source) && (
-                <option value={source}>{source || '—'}</option>
-              )}
-              {data?.branches.map((b) => (
-                <option key={b.name} value={b.name}>
-                  {b.name}
-                  {b.current ? ' (current)' : ''}
-                </option>
-              ))}
-            </Select>
+            <Select
+              value={source}
+              onChange={setSource}
+              className="flex-1"
+              aria-label="Source branch"
+              options={[
+                ...(data?.branches.some((b) => b.name === source)
+                  ? []
+                  : [{ value: source, label: source || '—' }]),
+                ...(data?.branches ?? []).map((b) => ({
+                  value: b.name,
+                  label: b.name,
+                  hint: b.current ? 'current' : undefined
+                }))
+              ]}
+            />
           ) : (
             <input
               className="field mono flex-1"
@@ -152,29 +164,26 @@ function PushForm({ prefill }: { prefill: Partial<PushSpec> }) {
         </div>
 
         <label className="text-xs text-muted">Remote</label>
-        <Select value={remote} onChange={(e) => setRemote(e.target.value)}>
-          {data?.remotes.map((r) => (
-            <option key={r.name} value={r.name}>
-              {r.name} — {shortUrl(r.pushUrl || r.fetchUrl)}
-            </option>
-          ))}
-        </Select>
+        <Select
+          value={remote}
+          onChange={setRemote}
+          aria-label="Remote"
+          options={(data?.remotes ?? []).map((r) => ({
+            value: r.name,
+            label: `${r.name} — ${shortUrl(r.pushUrl || r.fetchUrl)}`
+          }))}
+        />
 
         <label className="text-xs text-muted">Remote branch</label>
         <div>
-          <input
-            data-autofocus
-            className="field mono w-full"
-            list="push-remote-branches"
+          <Combobox
+            mono
+            autoFocus
             placeholder="branch name on the remote (new or existing)"
             value={dest}
-            onChange={(e) => setDest(e.target.value)}
+            onChange={setDest}
+            options={remoteBranches.map((r) => ({ value: r.name }))}
           />
-          <datalist id="push-remote-branches">
-            {remoteBranches.map((r) => (
-              <option key={r.short} value={r.name} />
-            ))}
-          </datalist>
           <div className="mt-1 text-[11px] text-faint">
             {spec.dest
               ? existing
@@ -214,9 +223,16 @@ function PushForm({ prefill }: { prefill: Partial<PushSpec> }) {
         <div className="flex gap-4">
           <Checkbox
             checked={setUpstream}
-            onChange={setSetUpstream}
+            onChange={setUpstreamChoice}
             disabled={sourceKind !== 'branch'}
             label="Set as upstream"
+            title={
+              unconnected
+                ? `${sourceInfo!.name} ${sourceInfo!.gone ? 'tracks a deleted branch' : 'has no upstream'}; pushing will connect it to ${remote}/${spec.dest || '…'}`
+                : sourceInfo?.upstream
+                  ? `${sourceInfo.name} currently tracks ${sourceInfo.upstream}`
+                  : undefined
+            }
           />
           <Checkbox
             checked={followTags}

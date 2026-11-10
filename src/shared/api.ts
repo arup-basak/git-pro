@@ -32,17 +32,44 @@ import type {
   IntegrateResult,
   MergePreview,
   RebaseOntoRequest,
-  RebasePreview
+  RebasePreview,
+  BlameResult,
+  BisectState,
+  WorktreeInfo,
+  WorktreeAddRequest,
+  IgnoreRequest,
+  SigningConfig,
+  SigningKey,
+  ConfigScope,
+  TrackingReport,
+  PublishItem,
+  PublishResult,
+  UpstreamChange,
+  LocalTrackingBranch,
+  BatchResult,
+  TerminalInfo
 } from './types'
 import type { MenuState } from './menu'
 
+/**
+ * Which refs the commit graph walks when no single ref is given: everything, only local
+ * branches (plus HEAD), or only remote-tracking branches.
+ */
+export type LogScope = 'all' | 'local' | 'remote'
+
 export interface LogQuery {
-  /** Ref to walk from; omitted means all branches, remotes and tags. */
+  /** Ref to walk from; omitted means the refs chosen by `scope`. */
   ref?: string
+  /** Defaults to 'all'. Ignored with `ref` or `path`. */
+  scope?: LogScope
   limit: number
   skip?: number
   search?: string
   searchMode?: 'message' | 'author' | 'sha'
+  /** Only commits that touch this file. */
+  path?: string
+  /** Follow the file across renames (only with `path`). */
+  follow?: boolean
 }
 
 /**
@@ -52,6 +79,8 @@ export interface LogQuery {
 export interface GitProApi {
   /** Renderer → main: current UI state for the application menu. */
   'app.menuState'(state: MenuState): Promise<void>
+  /** Whether the window is in native fullscreen (macOS hides the traffic lights then). */
+  'app.isFullScreen'(): Promise<boolean>
 
   'repo.pick'(): Promise<RepoInfo | null>
   'repo.openRecent'(path: string): Promise<RepoInfo>
@@ -62,6 +91,12 @@ export interface GitProApi {
   'repo.reveal'(repoId: string, relPath?: string): Promise<void>
   'repo.openFile'(repoId: string, relPath: string): Promise<void>
   'repo.identity'(repoId: string): Promise<Person>
+
+  /** In-app terminal: the user's login shell, started in the repository. */
+  'terminal.create'(repoId: string, cols: number, rows: number): Promise<TerminalInfo>
+  'terminal.write'(id: string, data: string): Promise<void>
+  'terminal.resize'(id: string, cols: number, rows: number): Promise<void>
+  'terminal.kill'(id: string): Promise<void>
 
   'log.list'(repoId: string, q: LogQuery): Promise<CommitSummary[]>
   'commit.detail'(repoId: string, sha: string): Promise<CommitDetail>
@@ -99,6 +134,15 @@ export interface GitProApi {
   'branch.merge'(repoId: string, req: BranchMergeRequest): Promise<IntegrateResult>
   'branch.rebasePreview'(repoId: string, branch: string, onto: string): Promise<RebasePreview>
   'branch.rebaseOnto'(repoId: string, req: RebaseOntoRequest): Promise<IntegrateResult>
+
+  /** Branches without a working connection to a remote, and remote branches with no local one. */
+  'tracking.report'(repoId: string): Promise<TrackingReport>
+  /** Pushes each branch to `<remote>/<dest>` and tracks it, in one `git push`. */
+  'tracking.publish'(repoId: string, remote: string, items: PublishItem[]): Promise<PublishResult>
+  /** Sets or removes upstreams, branch by branch. */
+  'tracking.setUpstreams'(repoId: string, changes: UpstreamChange[]): Promise<BatchResult>
+  /** Creates local branches tracking remote branches, without checking them out. */
+  'tracking.createLocal'(repoId: string, items: LocalTrackingBranch[]): Promise<BatchResult>
 
   'remote.fetch'(repoId: string, remote: string | null, prune: boolean): Promise<void>
   'remote.pull'(repoId: string, mode: 'ff-only' | 'merge' | 'rebase'): Promise<void>
@@ -174,6 +218,34 @@ export interface GitProApi {
 
   'reflog.list'(repoId: string, ref: string, limit: number): Promise<ReflogEntry[]>
 
+  /** Blame a file at a revision (null = the working tree). */
+  'file.blame'(repoId: string, path: string, rev: string | null): Promise<BlameResult>
+  /** Adds a pattern to .gitignore or .git/info/exclude (and optionally untracks files). */
+  'file.ignore'(repoId: string, req: IgnoreRequest): Promise<{ file: string; added: boolean }>
+
+  'bisect.state'(repoId: string): Promise<BisectState>
+  'bisect.start'(repoId: string, bad: string, good: string): Promise<BisectState>
+  'bisect.mark'(
+    repoId: string,
+    verdict: 'good' | 'bad' | 'skip',
+    rev?: string
+  ): Promise<BisectState>
+  'bisect.reset'(repoId: string): Promise<void>
+
+  'worktrees.list'(repoId: string): Promise<WorktreeInfo[]>
+  /** Asks where to put the worktree, then creates it. Null when the user cancels. */
+  'worktrees.add'(repoId: string, req: WorktreeAddRequest): Promise<WorktreeInfo | null>
+  'worktrees.remove'(repoId: string, path: string, force: boolean): Promise<void>
+  'worktrees.prune'(repoId: string): Promise<void>
+  /** Opens a worktree of this repository as a repository of its own. */
+  'worktrees.open'(repoId: string, path: string): Promise<RepoInfo>
+
+  'signing.get'(repoId: string): Promise<SigningConfig>
+  'signing.keys'(repoId: string): Promise<SigningKey[]>
+  'signing.set'(repoId: string, scope: ConfigScope, config: SigningConfig): Promise<void>
+  /** Signs a throwaway commit object to check the setup works. */
+  'signing.test'(repoId: string): Promise<{ ok: boolean; message: string }>
+
   'backup.list'(repoId: string): Promise<BackupInfo[]>
   'backup.restore'(
     repoId: string,
@@ -195,6 +267,8 @@ export interface GitProBridge {
     ...args: Parameters<GitProApi[K]>
   ): ReturnType<GitProApi[K]>
   on(listener: (event: AppEvent) => void): () => void
+  /** `process.platform` of the app, known synchronously so the first paint lays out correctly. */
+  platform: string
 }
 
 export const INVOKE_CHANNEL = 'gitpro:invoke'

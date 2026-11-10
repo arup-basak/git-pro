@@ -2,14 +2,25 @@ import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'node:path'
 import icon from '../../resources/icon.png?asset'
 import { execFile } from 'node:child_process'
+import { EVENT_CHANNEL } from '../shared/api'
+import type { AppEvent } from '../shared/types'
 import { registerIpc, stopWatchers } from './ipc'
 import { installMenu } from './menu'
 import { loadShellPath } from './shellPath'
 import { addRecent } from './store'
+import { killAllTerminals } from './terminal'
 
 const rendererUrl = !app.isPackaged ? process.env['ELECTRON_RENDERER_URL'] : undefined
 
+/**
+ * Toolbar height in the renderer (Tailwind `h-11`). On macOS the native title bar is hidden and
+ * the traffic lights are centred in this row instead.
+ */
+const TITLEBAR_HEIGHT = 44
+const TRAFFIC_LIGHT_SIZE = 14
+
 function createWindow(): void {
+  const mac = process.platform === 'darwin'
   const win = new BrowserWindow({
     width: 1480,
     height: 920,
@@ -18,6 +29,12 @@ function createWindow(): void {
     show: false,
     title: 'Git Pro',
     backgroundColor: '#0b0d10',
+    ...(mac
+      ? {
+          titleBarStyle: 'hidden' as const,
+          trafficLightPosition: { x: 16, y: (TITLEBAR_HEIGHT - TRAFFIC_LIGHT_SIZE) / 2 }
+        }
+      : {}),
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -30,6 +47,14 @@ function createWindow(): void {
   win.on('ready-to-show', () => win.show())
   // The window title is driven by the open repository (see menu.ts), not the page <title>.
   win.on('page-title-updated', (e) => e.preventDefault())
+
+  // Fullscreen hides the traffic lights, so the renderer drops the space it keeps for them.
+  const sendFullscreen = (fullscreen: boolean): void => {
+    const event: AppEvent = { type: 'window', fullscreen }
+    if (!win.isDestroyed()) win.webContents.send(EVENT_CHANNEL, event)
+  }
+  win.on('enter-full-screen', () => sendFullscreen(true))
+  win.on('leave-full-screen', () => sendFullscreen(false))
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//.test(url)) void shell.openExternal(url)
@@ -71,6 +96,9 @@ app.whenReady().then(() => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })
+
+// ⌘Q skips window-all-closed; make sure no shell outlives the app.
+app.on('will-quit', killAllTerminals)
 
 app.on('window-all-closed', () => {
   stopWatchers()

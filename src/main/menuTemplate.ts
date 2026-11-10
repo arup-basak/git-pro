@@ -135,7 +135,8 @@ export function buildMenuTemplate(s: MenuState, env: MenuEnv): Item[] {
     ['view.stashes', 'Stashes', 'stashes'],
     ['view.history', 'History Editor', 'history'],
     ['view.reflog', 'Reflog', 'reflog'],
-    ['view.backups', 'Backups', 'backups']
+    ['view.backups', 'Backups', 'backups'],
+    ['view.file', 'Blame & File History', 'file']
   ]
   const view: Item = {
     label: 'View',
@@ -145,6 +146,11 @@ export function buildMenuTemplate(s: MenuState, env: MenuEnv): Item[] {
       ),
       SEP,
       cmd('view.log', 'Command Log', { enabled: repo, type: 'checkbox', checked: s.logOpen }),
+      cmd('view.terminal', 'Terminal', {
+        enabled: repo,
+        type: 'checkbox',
+        checked: s.terminalOpen
+      }),
       cmd('repo.refresh', 'Refresh', { enabled: repo }),
       SEP,
       cmd('view.syntax', 'Syntax Highlighting', { type: 'checkbox', checked: s.syntax }),
@@ -203,6 +209,24 @@ export function buildMenuTemplate(s: MenuState, env: MenuEnv): Item[] {
       }),
       cmd('op.abort', busy ? `Abort ${opName}…` : 'Abort…', { enabled: busy }),
       SEP,
+      {
+        label: 'Bisect',
+        id: 'bisect.menu',
+        enabled: repo,
+        submenu: [
+          cmd('bisect.start', 'Start: Selected Commit Is Bad…', {
+            enabled: !!sel && !busy
+          }),
+          SEP,
+          cmd('bisect.good', 'Mark Good', { enabled: s.op.kind === 'bisect' }),
+          cmd('bisect.bad', 'Mark Bad', { enabled: s.op.kind === 'bisect' }),
+          cmd('bisect.skip', 'Skip', { enabled: s.op.kind === 'bisect' }),
+          cmd('bisect.reset', 'End Bisect', { enabled: s.op.kind === 'bisect' })
+        ]
+      },
+      cmd('worktree.add', 'New Worktree…', { enabled: head }),
+      cmd('repo.signing', 'Commit Signing…', { enabled: repo }),
+      SEP,
       cmd('remote.add', 'Add Remote…', { enabled: repo })
     ]
   }
@@ -230,9 +254,21 @@ export function buildMenuTemplate(s: MenuState, env: MenuEnv): Item[] {
       cmd('branch.rename', branch ? `Rename ${quote(branch)}…` : 'Rename Branch…', {
         enabled: repo && !!branch
       }),
+      cmd(
+        'branch.publish',
+        !s.branchSync || !branch
+          ? 'Publish Branch'
+          : s.branchSync.kind === 'track'
+            ? `Track ${quote(s.branchSync.target)}`
+            : s.branchSync.kind === 'republish'
+              ? `Publish ${quote(branch)} Again to ${quote(s.branchSync.target)}`
+              : `Publish ${quote(branch)} to ${quote(s.branchSync.target)}`,
+        { enabled: repo && !!branch && !!s.branchSync }
+      ),
       cmd('branch.upstream', branch ? `Set Upstream of ${quote(branch)}…` : 'Set Upstream…', {
         enabled: repo && !!branch
       }),
+      cmd('branch.tracking', 'Branch Tracking…', { enabled: repo }),
       cmd('branch.push', branch ? `Push ${quote(branch)}…` : 'Push Branch…', {
         enabled: hasRemotes && !!branch
       }),

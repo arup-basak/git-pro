@@ -1,5 +1,5 @@
-import { useId } from 'react'
-import { cx } from '../lib/format'
+import { useMemo } from 'react'
+import { Combobox } from './ui'
 
 /**
  * A text field that suggests branch, remote-branch and tag names as you type, and accepts any
@@ -20,23 +20,16 @@ export function RefInput({
   autoFocus?: boolean
   className?: string
 }) {
-  const id = useId()
+  const items = useMemo(() => options.map((o) => ({ value: o })), [options])
   return (
-    <>
-      <input
-        className={cx('field mono', className)}
-        list={id}
-        value={value}
-        placeholder={placeholder}
-        spellCheck={false}
-        data-autofocus={autoFocus || undefined}
-        onChange={(e) => onChange(e.target.value)}
-      />
-      <datalist id={id}>
-        {options.map((o) => (
-          <option key={o} value={o} />
-        ))}
-      </datalist>
-    </>
+    <Combobox
+      mono
+      className={className}
+      value={value}
+      onChange={onChange}
+      options={items}
+      placeholder={placeholder}
+      autoFocus={autoFocus}
+    />
   )
 }

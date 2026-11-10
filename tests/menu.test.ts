@@ -112,6 +112,24 @@ describe('application menu', () => {
     expect(byId(open, 'commit.edit').enabled).toBe(false) // nothing selected yet
   })
 
+  it('labels Publish for how the current branch is connected', () => {
+    const label = (branchSync: MenuState['branchSync']): [string, boolean | undefined] => {
+      const item = byId(buildMenuTemplate({ ...withRepo, branchSync }, env()), 'branch.publish')
+      return [String(item.label), item.enabled]
+    }
+    expect(label(null)).toEqual(['Publish Branch', false])
+    expect(label({ kind: 'publish', target: 'origin' })).toEqual([
+      'Publish “main” to “origin”',
+      true
+    ])
+    expect(label({ kind: 'track', target: 'origin/main' })).toEqual(['Track “origin/main”', true])
+    expect(label({ kind: 'republish', target: 'origin/main' })).toEqual([
+      'Publish “main” Again to “origin/main”',
+      true
+    ])
+    expect(byId(buildMenuTemplate(withRepo, env()), 'branch.tracking').enabled).toBe(true)
+  })
+
   it('reflects the selected commit, stash and in-progress operation', () => {
     const conflicted = buildMenuTemplate(
       {

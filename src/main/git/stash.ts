@@ -24,7 +24,15 @@ import {
   type StashMeta
 } from './stashStore'
 import { buildPartialPatch, currentDiff, insideWorktree, removeUntrackedLines } from './hunks'
-import { assertBranchName, currentBranch, emptyTree, tryResolve, withTempIndex } from './util'
+import {
+  assertBranchName,
+  currentBranch,
+  emptyTree,
+  indexTree,
+  tryResolve,
+  withIndexCopy,
+  withTempIndex
+} from './util'
 import { getStatus } from './worktree'
 
 export const APP_PREFIX = 'refs/git-pro/stashes/'
@@ -209,21 +217,21 @@ async function saveLineStash(cwd: string, req: StashSaveRequest, name: string): 
   const label = (await currentBranch(cwd)) ?? '(no branch)'
   const subject = await gitOut(cwd, ['log', '-1', '--format=%h %s', 'HEAD'])
   const noSign = '--no-gpg-sign'
-  const indexTree = await gitOut(cwd, ['write-tree'], { write: true })
+  const staged = await indexTree(cwd)
   const base =
-    indexTree === (await gitOut(cwd, ['rev-parse', 'HEAD^{tree}']))
+    staged === (await gitOut(cwd, ['rev-parse', 'HEAD^{tree}']))
       ? await gitOut(cwd, ['rev-parse', 'HEAD'])
       : await gitOut(cwd, [
           'commit-tree',
           noSign,
-          indexTree,
+          staged,
           '-p',
           'HEAD',
           '-m',
           `staged on ${label}: ${subject}`
         ])
   const tree = await withTempIndex(cwd, async (env) => {
-    await git(cwd, ['read-tree', indexTree], { env })
+    await git(cwd, ['read-tree', staged], { env })
     await git(cwd, ['apply', '--cached', '--recount', '--whitespace=nowarn', '-'], {
       env,
       input: patches.join('')
@@ -233,7 +241,7 @@ async function saveLineStash(cwd: string, req: StashSaveRequest, name: string): 
   const index = await gitOut(cwd, [
     'commit-tree',
     noSign,
-    indexTree,
+    staged,
     '-p',
     base,
     '-m',
@@ -377,9 +385,7 @@ export async function previewApply(cwd: string, sha: string): Promise<StashApply
   }
   const dirty = unstagedPaths(status.entries)
   const onWorktree = await appliesOnWorktree(cwd, sha, dirty)
-  const ours = onWorktree
-    ? await worktreeTree(cwd)
-    : await gitOut(cwd, ['write-tree'], { write: true })
+  const ours = onWorktree ? await worktreeTree(cwd) : await indexTree(cwd)
   const base = await gitOut(cwd, ['rev-parse', `${sha}^1^{tree}`])
   const theirs = await gitOut(cwd, ['rev-parse', `${sha}^{tree}`])
   const merged = await mergeTrees(cwd, base, ours, theirs)
@@ -466,9 +472,7 @@ async function appliesOnWorktree(cwd: string, sha: string, dirty: Set<string>): 
 
 /** Tree of the tracked files as they are on disk (index + unstaged edits). */
 async function worktreeTree(cwd: string): Promise<string> {
-  const index = await gitOut(cwd, ['write-tree'], { write: true })
-  return withTempIndex(cwd, async (env) => {
-    await git(cwd, ['read-tree', index], { env })
+  return withIndexCopy(cwd, async (env) => {
     await git(cwd, ['add', '-u'], { env })
     return gitOut(cwd, ['write-tree'], { env })
   })

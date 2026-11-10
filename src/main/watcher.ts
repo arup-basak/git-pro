@@ -15,12 +15,18 @@ export class RepoWatcher {
   constructor(
     private readonly worktree: string,
     private readonly gitDir: string,
-    private readonly onChange: (scope: Scope) => void
+    private readonly onChange: (scope: Scope) => void,
+    /** The shared git dir of a linked worktree (branch refs live there). */
+    private readonly commonDir?: string
   ) {}
 
   start(): void {
+    const outside = (dir: string): boolean => relative(this.worktree, dir).startsWith('..')
     const roots = [this.worktree]
-    if (relative(this.worktree, this.gitDir).startsWith('..')) roots.push(this.gitDir)
+    const common = this.commonDir && this.commonDir !== this.gitDir ? this.commonDir : undefined
+    // A linked worktree's git dir lives inside the common dir, so watching that covers both.
+    if (common && outside(common)) roots.push(common)
+    else if (outside(this.gitDir)) roots.push(this.gitDir)
     for (const root of roots) {
       try {
         const w = watch(root, { recursive: true }, (_event, filename) => {
@@ -49,6 +55,21 @@ export class RepoWatcher {
         return
       if (p === 'index') return this.fire('worktree')
       return this.fire('refs')
+    }
+    if (this.commonDir) {
+      const inCommon = relative(this.commonDir, abs)
+      if (!inCommon.startsWith('..')) {
+        // Shared state of a linked worktree: only refs matter here.
+        const p = inCommon.split(sep).join('/')
+        if (
+          p.endsWith('.lock') ||
+          /^(objects|logs|git-pro|worktrees)\//.test(p) ||
+          p === 'index' ||
+          p === 'HEAD'
+        )
+          return
+        return this.fire('refs')
+      }
     }
     if (filename.split(sep).includes('node_modules')) return
     this.fire('worktree')

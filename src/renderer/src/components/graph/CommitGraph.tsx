@@ -1,3 +1,4 @@
+import type { LogScope } from '@shared/api'
 import type { CommitSummary, RefLabel } from '@shared/types'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { Search, X } from 'lucide-react'
@@ -6,9 +7,10 @@ import { dragSource, dropTarget, useDropHover } from '../../lib/dnd'
 import { compactDate, cx, short } from '../../lib/format'
 import { LANE_COLORS, computeLanes, type LaneRow } from '../../lib/lanes'
 import { useLog, useRefs } from '../../lib/queries'
+import { useViewSettings } from '../../lib/settings'
 import { useUi } from '../../lib/store'
 import { CommitDetails } from '../commit/CommitDetails'
-import { Badge, Button, Empty, Select, Spinner, WithContextMenu } from '../ui'
+import { Badge, Button, Empty, Segmented, Select, Spinner, WithContextMenu } from '../ui'
 import { commitMenu } from './commitMenu'
 
 const ROW = 26
@@ -81,15 +83,29 @@ function RefBadge({ r }: { r: RefLabel }) {
   )
 }
 
-function RefBadges({ refs }: { refs: RefLabel[] }) {
+const SCOPES: ReadonlyArray<readonly [LogScope, string, string]> = [
+  ['all', 'All', 'Commits on every local branch, remote branch and tag'],
+  ['local', 'Local', 'Only commits on your local branches; hides remote branch labels'],
+  ['remote', 'Remote', 'Only commits on remote-tracking branches; hides local branch labels']
+]
+
+/** Labels the scope hides: remote branches in the local view, local branches in the remote one. */
+function inScope(r: RefLabel, scope: LogScope): boolean {
+  if (scope === 'local') return r.kind !== 'remote'
+  if (scope === 'remote') return r.kind !== 'branch'
+  return true
+}
+
+function RefBadges({ refs, scope }: { refs: RefLabel[]; scope: LogScope }) {
+  const shown = refs.filter((r) => inScope(r, scope))
   return (
     <>
-      {refs
+      {shown
         .filter((r) => r.kind !== 'head')
         .map((r) => (
           <RefBadge key={`${r.kind}:${r.name}`} r={r} />
         ))}
-      {refs.some((r) => r.kind === 'head') && !refs.some((r) => r.current) && (
+      {shown.some((r) => r.kind === 'head') && !shown.some((r) => r.current) && (
         <Badge color="head">HEAD</Badge>
       )}
     </>
@@ -103,7 +119,8 @@ const Row = memo(function Row({
   selected,
   onSelect,
   currentBranch,
-  tipHint
+  tipHint,
+  scope
 }: {
   c: CommitSummary
   lane: LaneRow
@@ -112,6 +129,7 @@ const Row = memo(function Row({
   onSelect: (sha: string) => void
   currentBranch: string | null
   tipHint?: string
+  scope: LogScope
 }) {
   const isHead = c.refs.some((r) => r.kind === 'head')
   return (
@@ -126,7 +144,7 @@ const Row = memo(function Row({
       >
         <GraphCell row={lane} width={graphWidth} />
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
-          <RefBadges refs={c.refs} />
+          <RefBadges refs={c.refs} scope={scope} />
           <span className={cx('truncate', isHead && 'font-semibold')}>{c.subject}</span>
         </div>
         <span
@@ -170,14 +188,19 @@ export function CommitGraph() {
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [mode, setMode] = useState<'message' | 'author' | 'sha'>('message')
+  const savedScope = useViewSettings((s) => s.graphScope)
+  const setSettings = useViewSettings((s) => s.set)
+  // A single-branch filter from the sidebar overrides the scope.
+  const scope: LogScope = ui.graphRef ? 'all' : savedScope
   useEffect(() => {
     const t = setTimeout(() => setSearch(searchInput.trim()), 300)
     return () => clearTimeout(t)
   }, [searchInput])
-  useEffect(() => setLimit(400), [ui.graphRef, search, mode])
+  useEffect(() => setLimit(400), [ui.graphRef, search, mode, scope])
 
   const log = useLog({
     ref: ui.graphRef ?? undefined,
+    scope,
     limit,
     search: search || undefined,
     searchMode: mode
@@ -235,13 +258,23 @@ export function CommitGraph() {
         </div>
         <Select
           value={mode}
-          onChange={(e) => setMode(e.target.value as typeof mode)}
+          onChange={setMode}
           className="w-28"
-        >
-          <option value="message">Message</option>
-          <option value="author">Author</option>
-          <option value="sha">SHA</option>
-        </Select>
+          aria-label="Search by"
+          options={[
+            { value: 'message', label: 'Message' },
+            { value: 'author', label: 'Author' },
+            { value: 'sha', label: 'SHA' }
+          ]}
+        />
+        <Segmented
+          value={ui.graphRef ? null : savedScope}
+          onChange={(v) => {
+            setSettings({ graphScope: v })
+            if (ui.graphRef) ui.setGraphRef(null)
+          }}
+          options={SCOPES}
+        />
         {ui.graphRef && (
           <span className="flex items-center gap-1 rounded bg-accent/15 py-0.5 pr-1 pl-2 text-xs text-accent">
             {ui.graphRef.replace(/^refs\/tags\//, 'tag ')}
@@ -269,7 +302,13 @@ export function CommitGraph() {
       >
         {log.isError && <Empty>{String((log.error as Error).message)}</Empty>}
         {!log.isLoading && !log.isError && commits.length === 0 && (
-          <Empty>{search ? 'No commits match' : 'No commits yet'}</Empty>
+          <Empty>
+            {search
+              ? 'No commits match'
+              : scope === 'remote'
+                ? 'No remote branches. Add a remote and fetch to see its commits here.'
+                : 'No commits yet'}
+          </Empty>
         )}
         <div style={{ height: virt.getTotalSize(), position: 'relative' }}>
           {virt.getVirtualItems().map((v) => {
@@ -293,6 +332,7 @@ export function CommitGraph() {
                   onSelect={select}
                   currentBranch={refs.data?.currentBranch ?? null}
                   tipHint={tipHint}
+                  scope={scope}
                 />
               </div>
             )

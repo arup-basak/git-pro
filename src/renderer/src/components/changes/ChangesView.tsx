@@ -1,13 +1,15 @@
 import { textHash } from '@shared/hash'
 import type { LineAction, LineSelection, StatusEntry } from '@shared/types'
 import { useQuery } from '@tanstack/react-query'
-import { Archive, GitMerge, Minus, Plus, Undo2 } from 'lucide-react'
+import { Archive, GitMerge, Minus, Plus, Undo2, X } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
 import { applyLines, discardChanges, openLiveMerge, run, stashSave } from '../../lib/actions'
+import { fileMenu } from '../../lib/everyday'
 import { call } from '../../lib/api'
 import { cx } from '../../lib/format'
 import { useRepoId, useStatus } from '../../lib/queries'
 import { FileRow } from '../commit/CommitDetails'
+import { FileList, FileListModeToggle } from '../FileList'
 import { DiffView, type DiffSelection } from '../commit/DiffView'
 import { Button, Empty } from '../ui'
 import { CommitComposer } from './CommitComposer'
@@ -29,6 +31,7 @@ function List({
   setFocus,
   selected,
   toggle,
+  selectMany,
   actions,
   rowActions
 }: {
@@ -39,8 +42,10 @@ function List({
   setFocus: (f: Focus) => void
   selected: Set<string>
   toggle: (path: string) => void
+  selectMany: (paths: string[], on: boolean) => void
   actions: ReactNode
-  rowActions: (e: StatusEntry) => ReactNode
+  /** Hover buttons for one file, or (folder view) for every file in a folder. */
+  rowActions: (entries: StatusEntry[]) => ReactNode
 }) {
   if (!entries.length) return null
   return (
@@ -51,27 +56,60 @@ function List({
         </span>
         {actions}
       </div>
-      {entries.map((e) => (
-        <div key={e.path} className="group relative flex items-center">
-          <input
-            type="checkbox"
-            className="ml-2 accent-accent-strong"
-            checked={selected.has(e.path)}
-            onChange={() => toggle(e.path)}
-            onClick={(ev) => ev.stopPropagation()}
-          />
-          <div className="min-w-0 flex-1">
-            <FileRow
-              f={{ path: e.path, oldPath: e.origPath, status: letterOf(e, staged) }}
-              active={focus?.path === e.path && focus.staged === staged}
-              onClick={() =>
-                setFocus({ path: e.path, staged, untracked: e.untracked, conflicted: e.conflicted })
+      <FileList
+        items={entries}
+        pathOf={(e) => e.path}
+        dirLeading={(files) => {
+          const on = files.filter((f) => selected.has(f.path)).length
+          return (
+            <input
+              type="checkbox"
+              aria-label="Select folder"
+              className="ml-2 accent-accent-strong"
+              checked={on === files.length}
+              ref={(el) => {
+                if (el) el.indeterminate = on > 0 && on < files.length
+              }}
+              onChange={() =>
+                selectMany(
+                  files.map((f) => f.path),
+                  on < files.length
+                )
               }
-              right={<span className="hidden gap-0.5 group-hover:flex">{rowActions(e)}</span>}
             />
+          )
+        }}
+        dirActions={rowActions}
+        renderFile={(e, row) => (
+          <div className="group relative flex items-center">
+            <input
+              type="checkbox"
+              className="ml-2 accent-accent-strong"
+              checked={selected.has(e.path)}
+              onChange={() => toggle(e.path)}
+              onClick={(ev) => ev.stopPropagation()}
+            />
+            <div className="min-w-0 flex-1">
+              <FileRow
+                f={{ path: e.path, oldPath: e.origPath, status: letterOf(e, staged) }}
+                active={focus?.path === e.path && focus.staged === staged}
+                onClick={() =>
+                  setFocus({
+                    path: e.path,
+                    staged,
+                    untracked: e.untracked,
+                    conflicted: e.conflicted
+                  })
+                }
+                right={<span className="hidden gap-0.5 group-hover:flex">{rowActions([e])}</span>}
+                menu={() => fileMenu(e.path, { entry: e })}
+                depth={row.depth}
+                nameOnly={row.tree}
+              />
+            </div>
           </div>
-        </div>
-      ))}
+        )}
+      />
     </div>
   )
 }
@@ -204,6 +242,15 @@ export function ChangesView() {
       else n.add(p)
       return n
     })
+  const selectMany = (paths: string[], on: boolean): void =>
+    setSelected((s) => {
+      const n = new Set(s)
+      for (const p of paths) {
+        if (on) n.add(p)
+        else n.delete(p)
+      }
+      return n
+    })
 
   const stage = (paths: string[]): Promise<unknown> =>
     run(() => call('worktree.stage', repoId, paths))
@@ -232,10 +279,15 @@ export function ChangesView() {
   return (
     <div className="flex h-full min-h-0">
       <div className="flex w-[380px] shrink-0 flex-col border-r border-line">
-        <div className="flex h-10 shrink-0 items-center gap-1.5 border-b border-line px-2">
+        <div className="flex h-10 shrink-0 items-center gap-1 border-b border-line px-2">
           {selectedPaths.length > 0 ? (
             <>
-              <span className="mr-1 text-xs text-muted">{selectedPaths.length} selected</span>
+              <span
+                title={`${selectedPaths.length} file${selectedPaths.length === 1 ? '' : 's'} selected`}
+                className="mr-0.5 shrink-0 rounded-full bg-accent-strong px-1.5 text-[11px] text-white tabular-nums"
+              >
+                {selectedPaths.length}
+              </span>
               <Button
                 size="sm"
                 onClick={() => void stage(selectedPaths).then(() => setSelected(new Set()))}
@@ -263,9 +315,15 @@ export function ChangesView() {
                 Discard
               </Button>
               <div className="flex-1" />
-              <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
-                Clear
-              </Button>
+              <button
+                type="button"
+                title="Clear selection"
+                aria-label="Clear selection"
+                className="shrink-0 rounded p-1 text-muted hover:bg-hover hover:text-fg"
+                onClick={() => setSelected(new Set())}
+              >
+                <X size={13} />
+              </button>
             </>
           ) : (
             <>
@@ -279,10 +337,12 @@ export function ChangesView() {
               >
                 Stash staged…
               </Button>
-              <div className="flex-1" />
-              <span className="text-[11px] text-faint">Tick files to act on a selection</span>
+              <span className="min-w-0 flex-1 truncate text-right text-[11px] text-faint">
+                Tick files to act on a selection
+              </span>
             </>
           )}
+          <FileListModeToggle />
         </div>
         <div className="min-h-0 flex-1 overflow-auto py-1">
           {conflicted.length > 0 && (
@@ -327,6 +387,7 @@ export function ChangesView() {
             setFocus={setFocus}
             selected={selected}
             toggle={toggle}
+            selectMany={selectMany}
             actions={
               <Button
                 size="sm"
@@ -336,8 +397,8 @@ export function ChangesView() {
                 Unstage all
               </Button>
             }
-            rowActions={(e) => (
-              <IconBtn title="Unstage" onClick={() => void unstage([e.path])}>
+            rowActions={(list) => (
+              <IconBtn title="Unstage" onClick={() => void unstage(list.map((e) => e.path))}>
                 <Minus size={12} />
               </IconBtn>
             )}
@@ -350,6 +411,7 @@ export function ChangesView() {
             setFocus={setFocus}
             selected={selected}
             toggle={toggle}
+            selectMany={selectMany}
             actions={
               <>
                 <Button size="sm" variant="ghost" onClick={() => void discard(unstaged)}>
@@ -364,12 +426,12 @@ export function ChangesView() {
                 </Button>
               </>
             }
-            rowActions={(e) => (
+            rowActions={(list) => (
               <>
-                <IconBtn title="Discard" onClick={() => void discard([e])}>
+                <IconBtn title="Discard" onClick={() => void discard(list)}>
                   <Undo2 size={12} />
                 </IconBtn>
-                <IconBtn title="Stage" onClick={() => void stage([e.path])}>
+                <IconBtn title="Stage" onClick={() => void stage(list.map((e) => e.path))}>
                   <Plus size={12} />
                 </IconBtn>
               </>

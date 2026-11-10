@@ -8,9 +8,9 @@ import { call } from '../../lib/api'
 import { cx, short } from '../../lib/format'
 import { invalidateRepo, showError, useRefs, useRepoId, useStatus } from '../../lib/queries'
 import { useUi, type IntegrateRequest } from '../../lib/store'
-import { refNames } from '../../lib/refs'
+import { branchOptions, refNames } from '../../lib/refs'
 import { RefInput } from '../RefInput'
-import { Button, Checkbox, Modal, Select } from '../ui'
+import { Button, Checkbox, Modal, Segmented, Select } from '../ui'
 
 export function IntegrateDialog() {
   const req = useUi((s) => s.integrate)
@@ -42,35 +42,6 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
     <div className="flex items-center gap-3">
       <label className="w-20 shrink-0 text-xs font-medium text-muted">{label}</label>
       <div className="flex min-w-0 flex-1 items-center gap-2">{children}</div>
-    </div>
-  )
-}
-
-function Segmented<T extends string>({
-  value,
-  onChange,
-  options
-}: {
-  value: T
-  onChange: (v: T) => void
-  options: Array<[T, string, string?]>
-}) {
-  return (
-    <div className="flex flex-1 rounded-md border border-line p-0.5">
-      {options.map(([v, label, title]) => (
-        <button
-          type="button"
-          key={v}
-          title={title}
-          onClick={() => onChange(v)}
-          className={cx(
-            'h-6 flex-1 rounded px-2 text-xs whitespace-nowrap',
-            value === v ? 'bg-line-strong text-fg' : 'text-muted hover:text-fg'
-          )}
-        >
-          {label}
-        </button>
-      ))}
     </div>
   )
 }
@@ -290,17 +261,16 @@ function MergeForm({ req }: { req: Extract<IntegrateRequest, { kind: 'merge' }> 
           />
         </Row>
         <Row label="Into">
-          <Select className="flex-1" value={target} onChange={(e) => setTarget(e.target.value)}>
-            {refs.data?.branches.map((b) => (
-              <option key={b.name} value={b.name}>
-                {b.name}
-                {b.current ? ' (checked out)' : ''}
-              </option>
-            ))}
-          </Select>
+          <Select
+            className="flex-1"
+            value={target}
+            onChange={setTarget}
+            aria-label="Into"
+            options={branchOptions(refs.data)}
+          />
         </Row>
         <Row label="How">
-          <Segmented value={mode} onChange={setMode} options={MERGE_MODES} />
+          <Segmented value={mode} onChange={setMode} options={MERGE_MODES} className="flex-1" />
         </Row>
         <div className="rounded-md border border-line bg-bg/50 px-3 py-2">
           {!source.trim() ? (
@@ -489,14 +459,13 @@ function RebaseForm({ req }: { req: Extract<IntegrateRequest, { kind: 'rebase' }
         }}
       >
         <Row label="Rebase">
-          <Select className="flex-1" value={branch} onChange={(e) => setBranch(e.target.value)}>
-            {refs.data?.branches.map((b) => (
-              <option key={b.name} value={b.name}>
-                {b.name}
-                {b.current ? ' (checked out)' : ''}
-              </option>
-            ))}
-          </Select>
+          <Select
+            className="flex-1"
+            value={branch}
+            onChange={setBranch}
+            aria-label="Rebase"
+            options={branchOptions(refs.data)}
+          />
         </Row>
         <Row label="Onto">
           <RefInput

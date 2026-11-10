@@ -31,9 +31,11 @@ import { cx, relative, short } from '../../lib/format'
 import { useRepoId, useStashFiles, useStashes } from '../../lib/queries'
 import { useUi } from '../../lib/store'
 import { FileRow } from '../commit/CommitDetails'
+import { FileList, FileListModeToggle } from '../FileList'
 import { DiffView } from '../commit/DiffView'
 import { Button, DropdownButton, Empty, Spinner, WithContextMenu, type MenuEntry } from '../ui'
 import { StashPreview } from './StashPreview'
+import { fileMenu } from '../../lib/everyday'
 
 type Sel =
   | { kind: 'app'; stash: AppStash }
@@ -420,15 +422,23 @@ function StashDetail({ sel, groups }: { sel: Sel; groups: string[] }) {
                 )}
               >
                 All files
+                <FileListModeToggle className="ml-auto" />
               </div>
-              {files.data?.map((f) => (
-                <FileRow
-                  key={f.path + f.untracked}
-                  f={{ path: f.path, status: f.untracked ? 'U' : f.status }}
-                  active={file === f.path}
-                  onClick={() => setFile(f.path)}
-                />
-              ))}
+              <FileList
+                items={files.data ?? []}
+                pathOf={(f) => f.path}
+                keyOf={(f) => f.path + f.untracked}
+                renderFile={(f, row) => (
+                  <FileRow
+                    f={{ path: f.path, status: f.untracked ? 'U' : f.status }}
+                    active={file === f.path}
+                    onClick={() => setFile(f.path)}
+                    menu={() => fileMenu(f.path)}
+                    depth={row.depth}
+                    nameOnly={row.tree}
+                  />
+                )}
+              />
             </div>
             <div className="min-w-0 flex-1">
               <DiffView patch={diff.data ?? ''} loading={diff.isLoading} />

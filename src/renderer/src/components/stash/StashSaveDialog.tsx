@@ -13,7 +13,7 @@ import {
   useStatus
 } from '../../lib/queries'
 import { useUi } from '../../lib/store'
-import { Button, Checkbox, Modal } from '../ui'
+import { Button, Checkbox, Combobox, Modal } from '../ui'
 
 export function StashSaveDialog() {
   const dlg = useUi((s) => s.stashDialog)
@@ -138,18 +138,12 @@ function StashSaveForm({
         <div className="flex gap-3">
           <div className="flex flex-1 flex-col gap-1">
             <label className="text-xs font-medium text-muted">Group</label>
-            <input
-              className="field"
-              list="stash-groups"
+            <Combobox
               placeholder="none"
               value={group}
-              onChange={(e) => setGroup(e.target.value)}
+              onChange={setGroup}
+              options={(stashes.data?.groups ?? []).map((g) => ({ value: g }))}
             />
-            <datalist id="stash-groups">
-              {stashes.data?.groups.map((g) => (
-                <option key={g} value={g} />
-              ))}
-            </datalist>
           </div>
         </div>
         <div className="flex flex-col gap-1">

@@ -116,6 +116,8 @@ export async function commit(cwd: string, req: CommitRequest): Promise<string> {
   if (req.signoff) args.push('--signoff')
   if (req.noVerify) args.push('--no-verify')
   if (req.allowEmpty) args.push('--allow-empty')
+  if (req.sign === true) args.push('-S')
+  else if (req.sign === false) args.push('--no-gpg-sign')
   if (req.author) args.push(`--author=${personArg(req.author)}`)
   if (req.authorDate) args.push(`--date=${toGitDateArg(req.authorDate)}`)
   if (!req.message.trim()) throw new Error('Commit message is empty')

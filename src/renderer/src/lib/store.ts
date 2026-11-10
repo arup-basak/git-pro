@@ -10,7 +10,16 @@ import type {
 } from '@shared/types'
 import { create } from 'zustand'
 
-export type View = 'graph' | 'changes' | 'stashes' | 'history' | 'merge' | 'reflog' | 'backups'
+export type View =
+  'graph' | 'changes' | 'stashes' | 'history' | 'merge' | 'reflog' | 'backups' | 'file'
+
+/** The File view: blame or history of one file, optionally at an older revision. */
+export interface FileRequest {
+  path: string
+  tab: 'blame' | 'history'
+  /** Revision to blame at; null = the working tree. */
+  rev: string | null
+}
 
 export interface MergeRequest {
   source: MergeSource
@@ -53,6 +62,9 @@ interface UiState {
   history: HistoryRequest | null
   push: Partial<PushSpec> | null
   integrate: IntegrateRequest | null
+  file: FileRequest | null
+  signingOpen: boolean
+  trackingOpen: boolean
   /** A finished history rewrite to report (from the History editor or a final Continue). */
   rewriteResult: RewriteResult | null
   logOpen: boolean
@@ -71,6 +83,9 @@ interface UiState {
   openPush(prefill: Partial<PushSpec>): void
   closePush(): void
   showRewriteResult(r: RewriteResult | null): void
+  openFile(req: FileRequest): void
+  setSigningOpen(open: boolean): void
+  setTrackingOpen(open: boolean): void
   openIntegrate(req: IntegrateRequest): void
   closeIntegrate(): void
   toggleLog(open?: boolean): void
@@ -95,6 +110,9 @@ export const useUi = create<UiState>((set) => ({
   push: null,
   integrate: null,
   rewriteResult: null,
+  file: null,
+  signingOpen: false,
+  trackingOpen: false,
   logOpen: false,
   stashSel: null,
   stashDialog: null,
@@ -113,7 +131,9 @@ export const useUi = create<UiState>((set) => ({
       merge: null,
       integrate: null,
       rewriteResult: null,
+      file: null,
       push: null,
+      trackingOpen: false,
       view: 'graph'
     }),
   setView: (view) => set({ view }),
@@ -123,6 +143,9 @@ export const useUi = create<UiState>((set) => ({
   openPush: (push) => set({ push }),
   closePush: () => set({ push: null }),
   showRewriteResult: (rewriteResult) => set({ rewriteResult }),
+  openFile: (file) => set({ file, view: 'file' }),
+  setSigningOpen: (signingOpen) => set({ signingOpen }),
+  setTrackingOpen: (trackingOpen) => set({ trackingOpen }),
   openIntegrate: (integrate) => set({ integrate }),
   closeIntegrate: () => set({ integrate: null }),
   toggleLog: (open) => set((s) => ({ logOpen: open ?? !s.logOpen })),

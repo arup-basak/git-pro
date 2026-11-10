@@ -48,9 +48,6 @@
     scrollbar-width: thin;
     scrollbar-color: #2b313b transparent;
   }
-  input[type='datetime-local']::-webkit-calendar-picker-indicator {
-    filter: invert(0.7);
-  }
 }
 
 @layer components {
@@ -61,4 +58,25 @@
     font-family: var(--font-mono);
     font-size: 12px;
   }
+}
+
+/*
+ * macOS window chrome (see lib/titlebar.ts). The native title bar is hidden, so `.titlebar` rows
+ * become the window's drag region and the traffic lights sit at their left edge. Unlayered so it
+ * overrides Tailwind's padding utilities.
+ */
+:root[data-titlebar='inset'] .titlebar {
+  -webkit-app-region: drag;
+  app-region: drag;
+  /* Room for the traffic lights (main/index.ts positions them at x=16). */
+  padding-left: 84px;
+}
+/* Anything clickable inside a drag region would otherwise swallow the click as a window drag. */
+:root[data-titlebar='inset']
+  .titlebar
+  :is(button, a, input, select, textarea, [role='button'], [role='combobox'], [tabindex]),
+/* Overlays and floating menus that cover the title bar must win over the drag region beneath. */
+:root[data-titlebar='inset'] :is(.no-drag, [role='dialog'], [role='alertdialog'], [data-radix-popper-content-wrapper]) {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }

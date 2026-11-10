@@ -25,7 +25,8 @@ const bridge = {
     const handler = (_e: unknown, event: AppEvent): void => listener(event)
     ipcRenderer.on(EVENT_CHANNEL, handler)
     return () => ipcRenderer.removeListener(EVENT_CHANNEL, handler)
-  }
+  },
+  platform: process.platform
 }
 
 contextBridge.exposeInMainWorld('gitPro', bridge)

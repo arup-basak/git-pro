@@ -1,9 +1,11 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
+import type { LogScope } from '../../../shared/api'
 
 export { SYNTAX_THEMES } from '../../../shared/themes'
 
 export type DiffLayout = 'unified' | 'split'
+export type FileListMode = 'list' | 'tree'
 
 export interface ViewSettings {
   /** Syntax highlighting in diffs, the merge editor and code views. */
@@ -16,6 +18,10 @@ export interface ViewSettings {
   wrap: boolean
   /** Show diffs as one column (unified) or old and new side by side (split). */
   diffLayout: DiffLayout
+  /** Which branches the All commits graph shows. */
+  graphScope: LogScope
+  /** Changed-file lists: one flat list, or grouped into folders. */
+  fileListMode: FileListMode
   set(patch: Partial<Omit<ViewSettings, 'set'>>): void
 }
 
@@ -35,6 +41,8 @@ export const useViewSettings = create<ViewSettings>()(
       wordDiff: true,
       wrap: true,
       diffLayout: 'unified',
+      graphScope: 'all',
+      fileListMode: 'list',
       set: (patch) => set(patch)
     }),
     {
@@ -43,12 +51,14 @@ export const useViewSettings = create<ViewSettings>()(
       storage: createJSONStorage(() =>
         typeof window === 'undefined' ? memoryStorage : window.localStorage
       ),
-      partialize: ({ syntax, theme, wordDiff, wrap, diffLayout }) => ({
+      partialize: ({ syntax, theme, wordDiff, wrap, diffLayout, graphScope, fileListMode }) => ({
         syntax,
         theme,
         wordDiff,
         wrap,
-        diffLayout
+        diffLayout,
+        graphScope,
+        fileListMode
       })
     }
   )

@@ -5,6 +5,11 @@ import { openForm } from './dialogs'
 import { showError } from './queries'
 import { useUi } from './store'
 
+/** Shows a repository the main process has opened (and refreshes the recent list). */
+export function showOpenedRepo(r: RepoInfo | null): void {
+  done(r)
+}
+
 function done(r: RepoInfo | null): void {
   if (r) useUi.getState().setRepo(r)
   void queryClient.invalidateQueries({ queryKey: ['recent'] })

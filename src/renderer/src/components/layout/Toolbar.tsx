@@ -3,23 +3,34 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   ChevronDown,
+  CloudUpload,
   FolderGit2,
   History,
+  Link2,
   PackageOpen,
   RefreshCw,
-  Terminal
+  ScrollText,
+  SquareTerminal
 } from 'lucide-react'
 import { call } from '../../lib/api'
-import { fetchRemote, pull, queryClient, stashSave } from '../../lib/actions'
+import { fetchRemote, pull, queryClient, setUpstream, stashSave } from '../../lib/actions'
 import { invalidateRepo, useRefs, useStatus } from '../../lib/queries'
 import { useUi } from '../../lib/store'
+import { toggleTerminal, useTerminals } from '../../lib/terminal'
 import { Button, DropdownButton, type MenuEntry } from '../ui'
 import { useOpenRepo } from '../../lib/useOpenRepo'
 import { ViewSettingsButton } from './ViewSettings'
+import {
+  branchTrackingEntries,
+  publishBranch,
+  trackUpstream,
+  useTracking
+} from '../../lib/tracking'
 
 export function Toolbar() {
   const repo = useUi((s) => s.repo)!
   const ui = useUi()
+  const terminalOpen = useTerminals((s) => s.open)
   const refs = useRefs()
   const status = useStatus()
   const open = useOpenRepo()
@@ -28,6 +39,8 @@ export function Toolbar() {
   const remotes = refs.data?.remotes ?? []
   const branchInfo = refs.data?.branches.find((b) => b.current)
   const changes = status.data?.entries.length ?? 0
+  const tracking = useTracking()
+  const state = current ? tracking?.byBranch.get(current) : undefined
 
   const repoMenu: MenuEntry[] = [
     ...(recent.data ?? [])
@@ -58,7 +71,7 @@ export function Toolbar() {
     })
 
   return (
-    <div className="flex h-11 shrink-0 items-center gap-2 border-b border-line bg-panel px-3">
+    <div className="titlebar flex h-11 shrink-0 items-center gap-2 border-b border-line bg-panel px-3">
       <DropdownButton
         entries={repoMenu}
         trigger={
@@ -73,10 +86,75 @@ export function Toolbar() {
       <span className="mono rounded bg-line px-2 py-0.5 text-[12px]" title="Current branch">
         {current ?? (refs.data?.head ? `detached @ ${refs.data.head.slice(0, 8)}` : 'no commits')}
       </span>
-      {branchInfo?.upstream && (
-        <span className="text-xs text-muted" title={`Tracking ${branchInfo.upstream}`}>
-          ↑{branchInfo.ahead ?? 0} ↓{branchInfo.behind ?? 0}
+      {current && state?.kind === 'tracking' && (
+        <span className="text-xs text-muted" title={`Tracking ${state.upstream}`}>
+          ↑{branchInfo?.ahead ?? 0} ↓{branchInfo?.behind ?? 0}
         </span>
+      )}
+      {current &&
+        state?.kind === 'unpublished' &&
+        tracking?.defaultRemote &&
+        (remotes.length === 1 ? (
+          <Button
+            size="sm"
+            icon={<CloudUpload size={12} />}
+            title={`${current} is not on ${tracking.defaultRemote} yet. Push it to ${tracking.defaultRemote}/${current} and track it.`}
+            onClick={() => void publishBranch(current, tracking.defaultRemote!)}
+          >
+            Publish
+          </Button>
+        ) : (
+          <DropdownButton
+            entries={branchTrackingEntries(current, state, refs.data!, tracking.defaultRemote)}
+            trigger={
+              <Button
+                size="sm"
+                icon={<CloudUpload size={12} />}
+                title={`${current} is not on any remote yet`}
+              >
+                Publish
+                <ChevronDown size={11} className="text-muted" />
+              </Button>
+            }
+          />
+        ))}
+      {current && state?.kind === 'unlinked' && (
+        <Button
+          size="sm"
+          icon={<Link2 size={12} />}
+          title={`${state.candidate} exists but ${current} does not track it`}
+          onClick={() => void trackUpstream(current, state.candidate)}
+        >
+          Track {state.candidate}
+        </Button>
+      )}
+      {current && state?.kind === 'gone' && (
+        <DropdownButton
+          entries={[
+            ...branchTrackingEntries(current, state, refs.data!, tracking?.defaultRemote ?? null),
+            { separator: true },
+            {
+              label: 'Track another branch…',
+              onSelect: () =>
+                void setUpstream(
+                  current,
+                  (refs.data?.remoteBranches ?? []).map((r) => r.short),
+                  state.upstream
+                )
+            },
+            { label: 'Branch tracking…', onSelect: () => ui.setTrackingOpen(true) }
+          ]}
+          trigger={
+            <Button
+              size="sm"
+              className="text-bad"
+              title={`${state.upstream} was deleted on the remote`}
+            >
+              Upstream gone
+              <ChevronDown size={11} />
+            </Button>
+          }
+        />
       )}
 
       <div className="mx-2 h-5 w-px bg-line" />
@@ -139,8 +217,16 @@ export function Toolbar() {
         title="Refresh"
       />
       <Button
+        variant={terminalOpen ? 'default' : 'ghost'}
+        icon={<SquareTerminal size={13} />}
+        onClick={() => toggleTerminal(repo.id)}
+        title="Terminal (⌃`)"
+      >
+        Terminal
+      </Button>
+      <Button
         variant={ui.logOpen ? 'default' : 'ghost'}
-        icon={<Terminal size={13} />}
+        icon={<ScrollText size={13} />}
         onClick={() => ui.toggleLog()}
         title="Command log"
       >

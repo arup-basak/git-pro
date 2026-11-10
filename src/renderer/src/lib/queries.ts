@@ -13,7 +13,10 @@ export const keys = {
   detail: (repoId: string, sha: string) => ['repo', repoId, 'detail', sha] as const,
   stashes: (repoId: string) => ['repo', repoId, 'stashes'] as const,
   backups: (repoId: string) => ['repo', repoId, 'backups'] as const,
-  reflog: (repoId: string, ref: string) => ['repo', repoId, 'reflog', ref] as const
+  reflog: (repoId: string, ref: string) => ['repo', repoId, 'reflog', ref] as const,
+  bisect: (repoId: string) => ['repo', repoId, 'bisect'] as const,
+  worktrees: (repoId: string) => ['repo', repoId, 'worktrees'] as const,
+  tracking: (repoId: string) => ['repo', repoId, 'tracking'] as const
 }
 
 export function useRepoId(): string {

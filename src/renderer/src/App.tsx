@@ -10,16 +10,21 @@ import { Toolbar } from './components/layout/Toolbar'
 import { Welcome } from './components/layout/Welcome'
 import { MergeEditorView } from './components/merge/MergeEditor'
 import { IntegrateDialog } from './components/dialogs/IntegrateDialog'
+import { SigningDialog } from './components/dialogs/SigningDialog'
+import { TrackingDialog } from './components/dialogs/TrackingDialog'
+import { FileView } from './components/file/FileView'
 import { DropMenuHost } from './components/DropMenu'
 import { RewriteResultDialog } from './components/history/RewriteResultDialog'
 import { PushDialog } from './components/push/PushDialog'
 import { StashSaveDialog } from './components/stash/StashSaveDialog'
 import { StashesView } from './components/stash/StashesView'
+import { TerminalPanel } from './components/terminal/TerminalPanel'
 import { BackupsView } from './components/views/BackupsView'
 import { ReflogView } from './components/views/ReflogView'
 import { useMenuCommands, useMenuState } from './lib/menuBridge'
 import { useAppEvents } from './lib/queries'
 import { useUi } from './lib/store'
+import { useTitlebar } from './lib/titlebar'
 
 function Main() {
   const view = useUi((s) => s.view)
@@ -36,6 +41,8 @@ function Main() {
       return <ReflogView />
     case 'backups':
       return <BackupsView />
+    case 'file':
+      return <FileView />
     default:
       return <GraphView />
   }
@@ -48,8 +55,11 @@ function Workspace() {
       <OperationBanner />
       <div className="flex min-h-0 flex-1">
         <Sidebar />
-        <main className="min-w-0 flex-1">
-          <Main />
+        <main className="flex min-w-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1">
+            <Main />
+          </div>
+          <TerminalPanel />
         </main>
       </div>
       <CommandLog />
@@ -58,6 +68,8 @@ function Workspace() {
       <IntegrateDialog />
       <RewriteResultHost />
       <DropMenuHost />
+      <SigningDialog />
+      <TrackingDialog />
       <StashSaveDialog />
     </div>
   )
@@ -65,6 +77,7 @@ function Workspace() {
 
 export default function App() {
   useAppEvents()
+  useTitlebar()
   useMenuState()
   useMenuCommands()
   const repo = useUi((s) => s.repo)

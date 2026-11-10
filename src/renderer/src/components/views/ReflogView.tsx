@@ -20,14 +20,19 @@ export function ReflogView() {
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-10 shrink-0 items-center gap-2 border-b border-line px-3 text-xs">
         <span className="text-muted">Reflog of</span>
-        <Select value={ref} onChange={(e) => setRef(e.target.value)} className="w-56">
-          <option value="HEAD">HEAD</option>
-          {refs.data?.branches.map((b) => (
-            <option key={b.name} value={`refs/heads/${b.name}`}>
-              {b.name}
-            </option>
-          ))}
-        </Select>
+        <Select
+          value={ref}
+          onChange={setRef}
+          className="w-56"
+          aria-label="Reflog of"
+          options={[
+            { value: 'HEAD', label: 'HEAD' },
+            ...(refs.data?.branches ?? []).map((b) => ({
+              value: `refs/heads/${b.name}`,
+              label: b.name
+            }))
+          ]}
+        />
         <span className="text-faint">
           Every position the ref has been at — right-click an entry to recover it.
         </span>

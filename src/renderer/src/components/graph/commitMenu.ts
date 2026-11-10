@@ -9,6 +9,7 @@ import {
   resetTo,
   revertCommit
 } from '../../lib/actions'
+import { bisectMenu } from '../../lib/everyday'
 import { short } from '../../lib/format'
 import { useUi } from '../../lib/store'
 import type { MenuEntry } from '../ui'
@@ -44,6 +45,7 @@ export function commitMenu(
       onSelect: () => void cherryPick(c.sha)
     },
     { label: 'Revert…', onSelect: () => void revertCommit(c.sha) },
+    bisectMenu(c.sha),
     ...(currentBranch
       ? [
           {
