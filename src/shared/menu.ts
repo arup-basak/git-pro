@@ -19,10 +19,13 @@ export type MenuCommand =
   | 'view.history'
   | 'view.reflog'
   | 'view.backups'
+  | 'view.file'
   | 'view.log'
+  | 'view.terminal'
   | 'view.syntax'
   | 'view.wordDiff'
   | 'view.wrap'
+  | 'view.splitDiff'
   | 'view.theme'
   | 'remote.fetchAll'
   | 'remote.fetch'
@@ -31,6 +34,13 @@ export type MenuCommand =
   | 'remote.pullRebase'
   | 'remote.push'
   | 'remote.add'
+  | 'repo.signing'
+  | 'worktree.add'
+  | 'bisect.start'
+  | 'bisect.good'
+  | 'bisect.bad'
+  | 'bisect.skip'
+  | 'bisect.reset'
   | 'history.edit'
   | 'op.resolve'
   | 'op.continue'
@@ -39,7 +49,11 @@ export type MenuCommand =
   | 'branch.new'
   | 'branch.checkout'
   | 'branch.rename'
+  | 'branch.merge'
+  | 'branch.rebase'
   | 'branch.upstream'
+  | 'branch.publish'
+  | 'branch.tracking'
   | 'branch.push'
   | 'branch.show'
   | 'changes.commit'
@@ -71,16 +85,23 @@ export interface MenuState {
   remotes: string[]
   hasHead: boolean
   hasUpstream: boolean
+  /**
+   * What "Publish" does for the current branch: push it to `target` (a remote) and track it,
+   * publish it again to its deleted upstream `target`, or track the existing `target` branch.
+   */
+  branchSync: { kind: 'publish' | 'republish' | 'track'; target: string } | null
   changes: number
   staged: number
   op: { kind: OpKind; conflicted: number }
   view: string
   logOpen: boolean
+  terminalOpen: boolean
   selectedCommit: { sha: string; subject: string } | null
   selectedStash: { label: string } | null
   syntax: boolean
   wordDiff: boolean
   wrap: boolean
+  splitDiff: boolean
   theme: string
 }
 
@@ -92,16 +113,19 @@ export const EMPTY_MENU_STATE: MenuState = {
   remotes: [],
   hasHead: false,
   hasUpstream: false,
+  branchSync: null,
   changes: 0,
   staged: 0,
   op: { kind: 'none', conflicted: 0 },
   view: 'graph',
   logOpen: false,
+  terminalOpen: false,
   selectedCommit: null,
   selectedStash: null,
   syntax: true,
   wordDiff: true,
   wrap: true,
+  splitDiff: false,
   theme: 'github-dark-default'
 }
 
@@ -122,7 +146,9 @@ export const ACCELERATORS: Partial<Record<MenuCommand, string>> = {
   'view.history': 'CmdOrCtrl+4',
   'view.reflog': 'CmdOrCtrl+5',
   'view.backups': 'CmdOrCtrl+6',
+  'view.file': 'CmdOrCtrl+7',
   'view.log': 'CmdOrCtrl+L',
+  'view.terminal': 'Ctrl+`',
   'remote.fetchAll': 'CmdOrCtrl+Shift+T',
   'remote.pull': 'CmdOrCtrl+Shift+P',
   'remote.push': 'CmdOrCtrl+P',
@@ -186,8 +212,10 @@ export const SHORTCUT_GROUPS: Array<{ title: string; items: Array<[MenuCommand, 
       ['view.history', 'History editor'],
       ['view.reflog', 'Reflog'],
       ['view.backups', 'Backups'],
+      ['view.file', 'Blame & file history'],
       ['find', 'Find commits'],
-      ['view.log', 'Command log']
+      ['view.log', 'Command log'],
+      ['view.terminal', 'Terminal']
     ]
   },
   {

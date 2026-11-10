@@ -11,7 +11,7 @@ export function Welcome() {
   const recent = useQuery({ queryKey: ['recent'], queryFn: () => call('repo.recent') })
   return (
     <div className="relative flex h-full items-center justify-center">
-      <div className="absolute top-3 right-3">
+      <div className="titlebar absolute inset-x-0 top-0 flex h-11 items-center justify-end px-3">
         <ViewSettingsButton />
       </div>
       <div className="w-[560px]">

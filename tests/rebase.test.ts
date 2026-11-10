@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { applyPlan, loadRange } from '../src/main/git/history'
 import { abortOp, detectOp } from '../src/main/git/opstate'
+import { abortOperation, stepOperation } from '../src/main/git/rebase'
 import type { HistoryAction, HistoryPlan, HistoryRange, RowEdit } from '../src/shared/types'
 import { makeRepo, type TestRepo } from './helpers/tmpRepo'
 
@@ -172,5 +173,94 @@ describe('structural rewrite (rebase engine)', () => {
         ])
       )
     ).rejects.toThrow(/oldest kept commit/)
+  })
+})
+
+describe('editing what a commit contains', () => {
+  it('pauses at an edit commit, amends staged changes on Continue, and reports the result', async () => {
+    const range = await fourFiles()
+    const res = await applyPlan(
+      repo.dir,
+      plan(range, [
+        [0, 'pick'],
+        [1, 'edit'],
+        [2, 'pick'],
+        [3, 'pick']
+      ])
+    )
+    expect(res.status).toBe('paused')
+    const op = await detectOp(repo.dir, [])
+    expect(op).toMatchObject({ kind: 'rebase', rebaseStop: 'edit' })
+    expect(range.rows[1].sha.startsWith(op.stoppedSha!)).toBe(true)
+    expect(op.stoppedSubject).toBe('B')
+
+    writeFileSync(join(repo.dir, 'b.txt'), 'b, edited\n')
+    writeFileSync(join(repo.dir, 'extra.txt'), 'added while editing\n')
+    await repo.git(['add', '-A'])
+    const done = await stepOperation(repo.dir, 'continue')
+    expect(done).toMatchObject({ status: 'done', branch: 'reworked' })
+    expect(done!.mapping.map((m) => m.old)).toEqual(range.rows.slice(1).map((r) => r.sha))
+    expect(await subjects('reworked')).toEqual(['A', 'B', 'C', 'D'])
+    expect(await repo.git(['show', 'reworked~2:b.txt'])).toBe('b, edited')
+    expect(await repo.git(['show', '--name-only', '--format=', 'reworked~2'])).toBe(
+      'b.txt\nextra.txt'
+    )
+    expect(await repo.git(['rev-parse', 'main'])).toBe(range.tipSha)
+  })
+
+  it('allows edit on the first row and combines it with a message edit', async () => {
+    const range = await fourFiles()
+    const res = await applyPlan(
+      repo.dir,
+      plan(range, [
+        [0, 'edit', { message: 'A, reworded\n' }],
+        [1, 'pick'],
+        [2, 'pick'],
+        [3, 'pick']
+      ])
+    )
+    expect(res.status).toBe('paused')
+    writeFileSync(join(repo.dir, 'a.txt'), 'a2\n')
+    await repo.git(['add', 'a.txt'])
+    const done = await stepOperation(repo.dir, 'continue')
+    expect(done?.status).toBe('done')
+    expect(await subjects('reworked')).toEqual(['A, reworded', 'B', 'C', 'D'])
+    expect(await repo.git(['show', 'reworked~3:a.txt'])).toBe('a2')
+  })
+
+  it('refuses to continue with unstaged changes, and abort cleans up', async () => {
+    const range = await fourFiles()
+    await applyPlan(
+      repo.dir,
+      plan(range, [
+        [0, 'pick'],
+        [1, 'pick'],
+        [2, 'edit'],
+        [3, 'pick']
+      ])
+    )
+    writeFileSync(join(repo.dir, 'c.txt'), 'unstaged\n')
+    await expect(stepOperation(repo.dir, 'continue')).rejects.toThrow(/unstaged/i)
+    expect((await detectOp(repo.dir, [])).rebaseStop).toBe('edit')
+    await repo.git(['checkout', '--', 'c.txt'])
+    await abortOperation(repo.dir)
+    expect((await detectOp(repo.dir, [])).kind).toBe('none')
+  })
+
+  it('a continue that hits a second edit stays paused', async () => {
+    const range = await fourFiles()
+    await applyPlan(
+      repo.dir,
+      plan(range, [
+        [0, 'pick'],
+        [1, 'edit'],
+        [2, 'edit'],
+        [3, 'pick']
+      ])
+    )
+    expect(await stepOperation(repo.dir, 'continue')).toBeNull()
+    const op = await detectOp(repo.dir, [])
+    expect(op.stoppedSubject).toBe('C')
+    expect((await stepOperation(repo.dir, 'continue'))?.status).toBe('done')
   })
 })

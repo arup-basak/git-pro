@@ -42,15 +42,11 @@ export function ViewSettingsButton() {
               <Select
                 value={s.theme}
                 disabled={!s.syntax}
-                onChange={(e) => s.set({ theme: e.target.value })}
+                onChange={(theme) => s.set({ theme })}
                 className="w-52"
-              >
-                {SYNTAX_THEMES.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.label}
-                  </option>
-                ))}
-              </Select>
+                aria-label="Syntax theme"
+                options={SYNTAX_THEMES.map((t) => ({ value: t.id, label: t.label }))}
+              />
             </div>
             <Checkbox
               checked={s.wordDiff}
@@ -61,6 +57,11 @@ export function ViewSettingsButton() {
               checked={s.wrap}
               onChange={(v) => s.set({ wrap: v })}
               label="Wrap long lines in diffs"
+            />
+            <Checkbox
+              checked={s.diffLayout === 'split'}
+              onChange={(v) => s.set({ diffLayout: v ? 'split' : 'unified' })}
+              label="Side-by-side diffs"
             />
           </div>
           <div className="mt-3 overflow-x-auto rounded-md border border-line bg-bg">

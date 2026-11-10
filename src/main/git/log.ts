@@ -45,14 +45,26 @@ export async function listLog(cwd: string, q: LogQuery): Promise<CommitSummary[]
     args.push('--regexp-ignore-case', '--fixed-strings')
     args.push(q.searchMode === 'author' ? `--author=${search}` : `--grep=${search}`)
   }
+  if (q.path && q.follow) args.push('--follow')
   if (q.ref) {
     assertSafe(q.ref, 'ref')
     args.push(q.ref)
-  } else {
-    args.push('--branches', '--remotes', '--tags')
+  } else if (q.path) {
+    // A file's history follows the checked-out branch.
     if (await tryResolve(cwd, 'HEAD')) args.push('HEAD')
+  } else {
+    const scope = q.scope ?? 'all'
+    if (scope !== 'remote') args.push('--branches')
+    if (scope !== 'local') args.push('--remotes')
+    if (scope === 'all') args.push('--tags')
+    // HEAD is local state (it may be detached), so the remote view leaves it out.
+    if (scope !== 'remote' && (await tryResolve(cwd, 'HEAD'))) args.push('HEAD')
   }
   args.push('--')
+  if (q.path) {
+    if (q.path.includes('\0')) throw new Error('Invalid path')
+    args.push(q.path)
+  }
   const r = await git(cwd, args, { allowFail: true, quietStdout: true })
   if (r.code !== 0) {
     // An empty repository (no commits yet) is not an error for the UI.

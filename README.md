@@ -26,15 +26,16 @@ Git Pro drives the `git` you already have installed. Pushes and fetches use your
 10. [Stashes](#stashes)
 11. [Merge editor](#merge-editor)
 12. [Branches, remotes and tags](#branches-remotes-and-tags)
-13. [Cherry-pick, revert, reset](#cherry-pick-revert-reset)
-14. [Reflog, backups and undo](#reflog-backups-and-undo)
-15. [Syntax highlighting and view settings](#syntax-highlighting-and-view-settings)
-16. [Command log](#command-log)
-17. [Menu bar and keyboard shortcuts](#menu-bar-and-keyboard-shortcuts)
-18. [Where Git Pro stores things](#where-git-pro-stores-things)
-19. [Troubleshooting](#troubleshooting)
-20. [Limits and known gaps](#limits-and-known-gaps)
-21. [Development](#development)
+13. [Merging and rebasing branches](#merging-and-rebasing-branches)
+14. [Cherry-pick, revert, reset](#cherry-pick-revert-reset)
+15. [Reflog, backups and undo](#reflog-backups-and-undo)
+16. [Syntax highlighting and view settings](#syntax-highlighting-and-view-settings)
+17. [Command log](#command-log)
+18. [Menu bar and keyboard shortcuts](#menu-bar-and-keyboard-shortcuts)
+19. [Where Git Pro stores things](#where-git-pro-stores-things)
+20. [Troubleshooting](#troubleshooting)
+21. [Limits and known gaps](#limits-and-known-gaps)
+22. [Development](#development)
 
 ---
 
@@ -121,18 +122,34 @@ Once a repository is open, the **repo name ▾** in the toolbar switches between
   - the **author and committer, each with their own date and UTC offset**
   - the changed files with `+/-` counts, and a diff that is syntax highlighted
 
+**Drag and drop**
+
+Drag a commit row, or a branch badge, onto a branch badge in the graph or onto a branch in the sidebar. A menu opens where you drop it:
+
+| Drag     | Drop on              | Choices                                                                                                                                      |
+| -------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| a commit | a local branch       | **Cherry-pick onto it**, **Rebase it onto this commit…**, **Move it here…** (or **Reset…** for the checked-out branch)                       |
+| a commit | a remote branch      | **Push this commit to it…**                                                                                                                  |
+| a branch | another local branch | **Merge into it…**, **Rebase onto it…**, **Rebase it onto this branch…** (opens the [Merge / Rebase dialog](#merging-and-rebasing-branches)) |
+| a branch | a remote branch      | **Push to it…**                                                                                                                              |
+
+- Cherry-picking onto a branch that is **not checked out** happens without touching your working tree, and keeps the original author, date and message. If it would conflict, Git Pro offers to check that branch out and cherry-pick there instead, so the merge editor can help.
+- **Move** points a branch that is not checked out at the commit. The old position goes to [Backups](#reflog-backups-and-undo).
+
 Right-click a commit:
 
-| Menu item                            | What it does                                                                                    |
-| ------------------------------------ | ----------------------------------------------------------------------------------------------- |
-| Edit date / author / message…        | Opens the [History editor](#changing-commit-dates-authors-and-messages) starting at this commit |
-| Push this commit to a remote branch… | Opens [Push](#pushing-to-any-branch) with this SHA as the source                                |
-| New branch here… / Tag here…         | Create a branch or tag at this commit                                                           |
-| Check out (detached)…                | `git switch --detach <sha>`                                                                     |
-| Cherry-pick onto _branch_            | `git cherry-pick` (merge commits use `-m 1`)                                                    |
-| Revert…                              | `git revert --no-edit`                                                                          |
-| Reset _branch_ to here…              | soft / mixed / keep / hard; a [backup](#reflog-backups-and-undo) is made first                  |
-| Copy SHA / Copy subject              | Clipboard                                                                                       |
+| Menu item                                                            | What it does                                                                                    |
+| -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Edit date / author / message…                                        | Opens the [History editor](#changing-commit-dates-authors-and-messages) starting at this commit |
+| Edit contents of this commit…                                        | Opens the History editor with this commit set to [`edit`](#changing-what-a-commit-contains)     |
+| Merge this commit into _branch_… / Rebase _branch_ onto this commit… | Opens the [Merge or Rebase dialog](#merging-and-rebasing-branches)                              |
+| Push this commit to a remote branch…                                 | Opens [Push](#pushing-to-any-branch) with this SHA as the source                                |
+| New branch here… / Tag here…                                         | Create a branch or tag at this commit                                                           |
+| Check out (detached)…                                                | `git switch --detach <sha>`                                                                     |
+| Cherry-pick onto _branch_                                            | `git cherry-pick` (merge commits use `-m 1`)                                                    |
+| Revert…                                                              | `git revert --no-edit`                                                                          |
+| Reset _branch_ to here…                                              | soft / mixed / keep / hard; a [backup](#reflog-backups-and-undo) is made first                  |
+| Copy SHA / Copy subject                                              | Clipboard                                                                                       |
 
 ---
 
@@ -235,6 +252,7 @@ In the History editor:
 - **Reorder:** drag a row by its ⋮⋮ handle, or use the ↑/↓ buttons in the expanded row.
 - **Action column:**
   - `pick` keeps the commit.
+  - `edit` keeps the commit but **pauses there so you can change its files** (see below).
   - `squash` folds it into the commit **below** it and keeps both messages.
   - `fixup` folds it in and keeps only the lower commit's message.
   - `drop` removes the commit.
@@ -249,6 +267,17 @@ When you click **Create branch**:
   - Resolve the files, then press **Continue** in the banner.
   - **Skip** drops the commit being replayed. **Abort** returns everything to how it was.
 - Ranges that contain **merge commits** can't be reordered, squashed or dropped. You can still edit their dates, authors and messages.
+
+### Changing what a commit contains
+
+Right-click a commit → **Edit contents of this commit…** (or set its action to `edit` in the History editor), then **Create branch** (or **Rewrite** in place).
+
+1. The rewrite stops right after that commit. The banner reads **Editing _sha subject_**, and your working tree holds the commit's files.
+2. Change files in your editor, then stage what belongs in the commit in **Changes**. You can stage whole files or single lines; untracked files can be added too.
+3. Press **Continue**. The staged changes are folded into the commit, and the rest of the history is replayed on top.
+4. When the last step finishes, the usual result dialog lists the old → new commits.
+
+Continue refuses while unstaged changes are left over: stage them, or stash or discard them, first. Several commits can be set to `edit`; the rewrite stops at each one. **Abort** puts everything back.
 
 ---
 
@@ -294,6 +323,18 @@ Open **Changes** in the sidebar (the badge counts changed files).
 - **Stage all / Unstage all / Discard all** apply to a whole list.
 - Discarding asks for confirmation and deletes untracked files. It cannot be undone, so stash instead if unsure.
 
+**Acting on hunks and single lines**
+
+The diff of the selected file has a narrow gutter on the left:
+
+- **Tick a changed line** to select it. **Shift-click** selects a range; **drag** down the gutter to select several lines.
+- The checkbox on a hunk header (`@@ … @@`) selects or clears every changed line in that hunk.
+- With lines selected, the bar above the diff offers **Stage lines**, **Stash lines…** and **Discard lines…** (or **Unstage lines** for a staged file).
+- Every hunk header also has its own buttons: **Stage hunk**, **Stash hunk…** and **Discard hunk…**, or **Unstage hunk**.
+- Selecting only the `+` side of a changed line stages just the addition; the removed line stays as it was.
+- This works in untracked files too, and in side-by-side mode.
+- If the file changes on disk after you selected lines, Git Pro refuses the action and shows the fresh diff, so it never applies a stale selection.
+
 **Commit box** (bottom-left)
 
 | Option               | Meaning                                                                                   |
@@ -324,8 +365,11 @@ Git Pro keeps two kinds of stash.
 Click **Stash** in the toolbar, or in Changes use **Stash all…**, **Stash staged…**, or tick files → **Stash…**. Then fill in:
 
 - **Name** (defaults to `WIP on <branch>`), **Group** (suggests existing groups), **Notes**.
-- **What to stash:** All changes / Staged only / Selected files.
-- **Include untracked files.**
+- **What to stash:** All changes / Staged only / Selected files / Selected lines.
+- **Include untracked files** (not used for selected lines).
+
+**Stashing lines.** In Changes, tick lines in a diff (or use a hunk's **Stash hunk…**) and choose **Stash lines…**. Only those lines leave your working tree; everything else, including anything you have staged, stays where it is. The stash is an ordinary app stash: you can preview it, apply it, or make a branch from it.
+
 - **Keep changes in the working tree:** records a snapshot without touching your files.
 
 ### The Stashes view
@@ -352,14 +396,15 @@ The **Apply preview** tab simulates `git stash apply` against your current works
 - **Applies cleanly** in green, or a count of conflicts and blocked files.
 - Each file gets an outcome:
 
-  | Mark            | Outcome                                                                                                                       |
-  | --------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-  | `M` / `A` / `D` | Will be modified / added / deleted                                                                                            |
-  | `U`             | Untracked file that will be restored                                                                                          |
-  | `!`             | **Conflict** — click _merge_ or **Preview merge** to see the result in a read-only merge editor                               |
-  | `×`             | **Blocked** — you have uncommitted changes to that file, or an untracked file with that name already exists; git would refuse |
+  | Mark            | Outcome                                                                                                                      |
+  | --------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+  | `M` / `A` / `D` | Will be modified / added / deleted                                                                                           |
+  | `U`             | Untracked file that will be restored                                                                                         |
+  | `!`             | **Conflict** — click _merge_ or **Preview merge** to see the result in a read-only merge editor                              |
+  | `×`             | **Blocked** — the stash changes the same lines as your uncommitted edits, or an untracked file with that name already exists |
 
 - Selecting a file shows the diff of exactly what will change in your working tree.
+- **Applying on top of uncommitted edits.** Plain `git stash apply` refuses to touch a file you are still editing. When that happens, Git Pro merges the stash into those files on disk instead, and the preview says **Applies on top of your uncommitted edits**. Nothing is staged. If a stashed line overlaps one of your edits, the file is shown as blocked and nothing is applied.
 - **Restore staged state (--index)** also re-stages what was staged when the stash was made.
 - **Apply** keeps the stash. **Apply & remove** moves an app stash to Recently deleted, or pops a stack entry. Both are disabled while files are blocked.
 
@@ -424,16 +469,36 @@ In **preview** mode (from Apply preview), it is read-only.
 
 Every sidebar item has a right-click menu.
 
-| Item                                  | Actions                                                                                                                                                                       |
-| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Branch** (double-click = check out) | Check out · Push to… · Edit history… · New branch from here… · Rename… · Set upstream… · Copy name · Delete… (backed up first; asks before force-deleting an unmerged branch) |
-| **Remote** (+ in the header adds one) | Fetch · Edit URL… · Copy URL · Remove remote… (only removes it locally)                                                                                                       |
-| **Remote branch**                     | Check out as local branch… · New branch from here… · Push something to this branch… · Edit history… · Copy name · Delete on _remote_…                                         |
-| **Tag**                               | Show in graph · New branch from tag… · Push to _remote_ · Copy name · Delete local tag… · Delete on _remote_…                                                                 |
+| Item                                  | Actions                                                                                                                                                                                          |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Branch** (double-click = check out) | Check out · Push to… · Edit history… · Merge… · Rebase… · New branch from here… · Rename… · Set upstream… · Copy name · Delete… (backed up first; asks before force-deleting an unmerged branch) |
+| **Remote** (+ in the header adds one) | Fetch · Edit URL… · Copy URL · Remove remote… (only removes it locally)                                                                                                                          |
+| **Remote branch**                     | Check out as local branch… · New branch from here… · Push something to this branch… · Edit history… · Copy name · Delete on _remote_…                                                            |
+| **Tag**                               | Show in graph · New branch from tag… · Push to _remote_ · Copy name · Delete local tag… · Delete on _remote_…                                                                                    |
 
 - Branch rows show ↑ahead ↓behind their upstream, or `gone` if the upstream was deleted.
 - **Tag here…** on a commit creates a lightweight or **annotated** tag; annotated tags can have a **custom tagger date**.
 - Toolbar: **Fetch** fetches all remotes or one, pruning deleted branches. **Pull** offers fast-forward only, merge or rebase.
+
+## Merging and rebasing branches
+
+Right-click any branch, remote branch, tag or commit and choose **Merge _x_ into _current_…** or **Rebase _current_ onto _x_…**. The current branch's own menu has **Merge into _branch_…** and **Rebase _branch_ onto…**, and the **Branch** menu has both too.
+
+**Merge**
+
+- **Merge** is what to bring in (any branch, remote branch, tag or commit; names are suggested as you type). **Into** is the local branch that receives it.
+- **How:** **Fast-forward if possible** (git's default), **Always a merge commit** (`--no-ff`), **Fast-forward only**, or **Squash** (one new commit, not a merge).
+- The preview shows the commits and files that come in, and any conflicts. **Preview in merge editor** shows the conflicted result read-only.
+- **Result:** into the branch itself (a [backup](#reflog-backups-and-undo) of its old position is kept), or into a **new branch** made from it.
+- **Branches that are not checked out** are merged without touching your working tree, so you can keep working. A merge like that must be conflict-free. If it is not, Git Pro checks the branch out first, and the conflicts open in the merge editor as usual.
+- The **Command** box shows what will run.
+
+**Rebase onto**
+
+- Replays a branch's own commits on top of another branch, tag or commit. The preview lists the commits to replay.
+- **Result:** a **new branch** by default (the original stays as it was), or **rewrite the branch in place** (a backup is kept; pushing it then needs a force push).
+- **Autostash** puts uncommitted changes aside during the rebase. **Keep merge commits** (`--rebase-merges`) appears when the branch has merges.
+- Conflicts stop the rebase with the usual banner: resolve the files in the merge editor, then **Continue**, **Skip** or **Abort**. The rebased branch is checked out afterwards.
 
 ## Cherry-pick, revert, reset
 
@@ -500,6 +565,7 @@ Highlighting appears in every diff (commits, working tree, stashes, apply previe
 | Theme                            | GitHub Dark. Others: GitHub Dimmed, VS Code Dark+, One Dark Pro, Vitesse, Tokyo Night, Catppuccin Mocha, Nord, Rosé Pine, Kanagawa, Vesper, Minimal |
 | Highlight changed words in diffs | On                                                                                                                                                  |
 | Wrap long lines in diffs         | On                                                                                                                                                  |
+| Side-by-side diffs               | Off. When on, every diff shows the old version on the left and the new version on the right, with each changed line next to its replacement         |
 
 ## Command log
 

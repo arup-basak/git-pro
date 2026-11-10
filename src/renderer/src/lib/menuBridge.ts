@@ -1,4 +1,5 @@
 import type { MenuCommand, MenuState } from '@shared/menu'
+import { trackingOverview } from '@shared/tracking'
 import type { RefsSnapshot, RepoStatus, StashOverview, StashTarget } from '@shared/types'
 import { useQuery } from '@tanstack/react-query'
 import { useEffect } from 'react'
@@ -29,10 +30,31 @@ import {
   unstagePaths
 } from './actions'
 import { call } from './api'
+import { addWorktree, bisectEnd, bisectMark, bisectStartAt } from './everyday'
 import { invalidateRepo, keys } from './queries'
 import { useViewSettings } from './settings'
 import { useUi } from './store'
+import { toggleTerminal, useTerminals } from './terminal'
 import { cloneRepo, initRepo, openRecentRepo, pickRepo } from './useOpenRepo'
+import { publishBranch, republishTarget, trackUpstream } from './tracking'
+
+/** What Branch ▸ Publish does for the current branch, if anything. */
+function branchSync(refs: RefsSnapshot | undefined): MenuState['branchSync'] {
+  const branch = refs?.currentBranch
+  if (!refs || !branch) return null
+  const ov = trackingOverview(refs)
+  const t = ov.byBranch.get(branch)
+  switch (t?.kind) {
+    case 'unpublished':
+      return ov.defaultRemote ? { kind: 'publish', target: ov.defaultRemote } : null
+    case 'unlinked':
+      return { kind: 'track', target: t.candidate }
+    case 'gone':
+      return republishTarget(t.upstream, refs) ? { kind: 'republish', target: t.upstream } : null
+    default:
+      return null
+  }
+}
 
 /* ---------------- state → menu ---------------- */
 
@@ -41,11 +63,13 @@ export function useMenuState(): void {
   const repo = useUi((s) => s.repo)
   const view = useUi((s) => s.view)
   const logOpen = useUi((s) => s.logOpen)
+  const terminalOpen = useTerminals((s) => s.open)
   const selectedSha = useUi((s) => s.selectedSha)
   const stashSel = useUi((s) => s.stashSel)
   const syntax = useViewSettings((s) => s.syntax)
   const wordDiff = useViewSettings((s) => s.wordDiff)
   const wrap = useViewSettings((s) => s.wrap)
+  const splitDiff = useViewSettings((s) => s.diffLayout === 'split')
   const theme = useViewSettings((s) => s.theme)
   const repoId = repo?.id ?? ''
   const enabled = !!repo
@@ -89,6 +113,7 @@ export function useMenuState(): void {
     remotes: refs.data?.remotes.map((r) => r.name) ?? [],
     hasHead: !!refs.data?.head,
     hasUpstream: !!current?.upstream,
+    branchSync: branchSync(refs.data),
     changes: entries.length,
     staged: entries.filter((e) => !e.untracked && !e.conflicted && e.index !== '.').length,
     op: {
@@ -97,6 +122,7 @@ export function useMenuState(): void {
     },
     view,
     logOpen,
+    terminalOpen,
     selectedCommit:
       selectedSha && detail.data?.sha === selectedSha
         ? { sha: selectedSha, subject: detail.data.subject }
@@ -107,6 +133,7 @@ export function useMenuState(): void {
     syntax,
     wordDiff,
     wrap,
+    splitDiff,
     theme
   }
   const json = JSON.stringify(state)
@@ -174,6 +201,9 @@ export async function runMenuCommand(command: MenuCommand, arg?: string): Promis
     case 'view.wrap':
       settings.set({ wrap: !settings.wrap })
       return
+    case 'view.splitDiff':
+      settings.set({ diffLayout: settings.diffLayout === 'split' ? 'unified' : 'split' })
+      return
     case 'view.theme':
       if (arg) settings.set({ theme: arg, syntax: true })
       return
@@ -219,8 +249,28 @@ export async function runMenuCommand(command: MenuCommand, arg?: string): Promis
     case 'view.backups':
       ui.setView('backups')
       return
+    case 'view.file':
+      ui.setView('file')
+      return
+    case 'repo.signing':
+      ui.setSigningOpen(true)
+      return
+    case 'worktree.add':
+      await addWorktree()
+      return
+    case 'bisect.good':
+    case 'bisect.bad':
+    case 'bisect.skip':
+      await bisectMark(command.slice(7) as 'good' | 'bad' | 'skip')
+      return
+    case 'bisect.reset':
+      await bisectEnd()
+      return
     case 'view.log':
       ui.toggleLog()
+      return
+    case 'view.terminal':
+      toggleTerminal(repoId)
       return
 
     case 'remote.fetchAll':
@@ -270,6 +320,12 @@ export async function runMenuCommand(command: MenuCommand, arg?: string): Promis
     case 'branch.checkout':
       if (arg && arg !== branch) await checkoutBranch(arg)
       return
+    case 'branch.merge':
+      if (branch) ui.openIntegrate({ kind: 'merge', target: branch })
+      return
+    case 'branch.rebase':
+      if (branch) ui.openIntegrate({ kind: 'rebase', branch })
+      return
     case 'branch.rename':
       if (branch) await renameBranch(branch)
       return
@@ -279,6 +335,20 @@ export async function runMenuCommand(command: MenuCommand, arg?: string): Promis
       await setUpstream(branch, refs?.remoteBranches.map((r) => r.short) ?? [], upstream)
       return
     }
+    case 'branch.publish': {
+      const sync = branchSync(refs)
+      if (!branch || !sync) return
+      if (sync.kind === 'track') await trackUpstream(branch, sync.target)
+      else if (sync.kind === 'publish') await publishBranch(branch, sync.target)
+      else {
+        const t = refs && republishTarget(sync.target, refs)
+        if (t) await publishBranch(branch, t.remote, t.dest)
+      }
+      return
+    }
+    case 'branch.tracking':
+      ui.setTrackingOpen(true)
+      return
     case 'branch.show': {
       if (!branch) return
       ui.setGraphRef(branch)
@@ -374,6 +444,9 @@ export async function runMenuCommand(command: MenuCommand, arg?: string): Promis
       return
     case 'commit.copySha':
       copy(sha, 'SHA copied')
+      return
+    case 'bisect.start':
+      await bisectStartAt(sha)
       return
   }
 }

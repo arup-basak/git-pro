@@ -107,7 +107,8 @@ test('View menu switches views and toggles settings', async () => {
 test('Commit menu acts on the selected commit', async () => {
   await page.getByText('first commit').first().click()
   await expect.poll(async () => (await item('commit.edit'))?.enabled).toBe(true)
-  expect((await item('commit.selected'))?.label).toContain('first commit')
+  // The label gains the subject once the commit's details have loaded.
+  await expect.poll(async () => (await item('commit.selected'))?.label).toContain('first commit')
   await click('commit.edit')
   const sha = git('rev-parse', 'HEAD~1')
   await expect(page.locator(`#hrow-${sha}`)).toBeVisible()

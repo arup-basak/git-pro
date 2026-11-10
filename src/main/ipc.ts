@@ -4,20 +4,30 @@ import { basename, isAbsolute, join, relative, resolve } from 'node:path'
 import { EVENT_CHANNEL, INVOKE_CHANNEL, type GitProApi, type InvokeEnvelope } from '../shared/api'
 import type { AppEvent, RepoInfo } from '../shared/types'
 import * as backup from './git/backup'
+import * as bisect from './git/bisect'
+import * as blame from './git/blame'
 import * as branches from './git/branches'
 import * as commits from './git/commits'
 import * as history from './git/history'
+import * as hunks from './git/hunks'
+import * as ignore from './git/ignore'
+import * as integrate from './git/integrate'
 import * as log from './git/log'
 import * as merge from './git/merge'
-import * as op from './git/opstate'
+import * as rebase from './git/rebase'
 import * as reflog from './git/reflog'
+import * as signing from './git/signing'
 import * as remotes from './git/remotes'
 import { GitError, git, setCommandLogSink } from './git/runner'
 import * as stash from './git/stash'
+import { commonDir } from './git/stashStore'
 import * as tags from './git/tags'
+import * as tracking from './git/tracking'
 import { assertSafe, gitDir } from './git/util'
 import * as wt from './git/worktree'
+import * as worktrees from './git/worktrees'
 import { addRecent, loadSettings, removeRecent } from './store'
+import * as terminal from './terminal'
 import { updateMenuState } from './menu'
 import { RepoWatcher } from './watcher'
 
@@ -51,8 +61,11 @@ async function openRepo(dir: string): Promise<RepoInfo> {
   if (r.code !== 0) throw new Error(`${dir} is not inside a Git repository`)
   const top = realpathSync(r.stdout.trim())
   if (!openRepos.has(top)) {
-    const watcher = new RepoWatcher(top, await gitDir(top), (scope) =>
-      broadcast({ type: 'repo-changed', repoId: top, scope })
+    const watcher = new RepoWatcher(
+      top,
+      await gitDir(top),
+      (scope) => broadcast({ type: 'repo-changed', repoId: top, scope }),
+      await commonDir(top)
     )
     watcher.start()
     openRepos.set(top, watcher)
@@ -81,6 +94,7 @@ type Handlers = {
 
 const handlers: Handlers = {
   'app.menuState': async (state) => updateMenuState(state),
+  'app.isFullScreen': async () => focusedWindow()?.isFullScreen() ?? false,
   'repo.pick': async () => {
     const dir = await pickDirectory('Open Git repository')
     return dir ? openRepo(dir) : null
@@ -130,6 +144,12 @@ const handlers: Handlers = {
   },
   'repo.identity': async (repoId) => wt.identity(repo(repoId)),
 
+  'terminal.create': async (repoId, cols, rows) =>
+    terminal.createTerminal(repo(repoId), cols, rows),
+  'terminal.write': async (id, data) => terminal.writeTerminal(id, data),
+  'terminal.resize': async (id, cols, rows) => terminal.resizeTerminal(id, cols, rows),
+  'terminal.kill': async (id) => terminal.killTerminal(id),
+
   'log.list': async (repoId, q) => log.listLog(repo(repoId), q),
   'commit.detail': async (repoId, sha) => log.commitDetail(repo(repoId), sha),
   'commit.diff': async (repoId, sha, paths) => log.commitDiff(repo(repoId), sha, paths),
@@ -142,6 +162,7 @@ const handlers: Handlers = {
   'worktree.unstage': async (repoId, paths) => wt.unstage(repo(repoId), paths),
   'worktree.discard': async (repoId, tracked, untracked) =>
     wt.discard(repo(repoId), tracked, untracked),
+  'worktree.applyLines': async (repoId, action, sel) => hunks.applyLines(repo(repoId), action, sel),
   'worktree.commit': async (repoId, req) => wt.commit(repo(repoId), req),
 
   'branch.create': async (repoId, name, start, checkout) =>
@@ -153,6 +174,20 @@ const handlers: Handlers = {
   'branch.delete': async (repoId, name, force) => branches.deleteBranch(repo(repoId), name, force),
   'branch.setUpstream': async (repoId, name, upstream) =>
     branches.setUpstream(repo(repoId), name, upstream),
+  'branch.move': async (repoId, name, sha) => branches.moveBranch(repo(repoId), name, sha),
+  'branch.mergePreview': async (repoId, source, target) =>
+    integrate.mergePreview(repo(repoId), source, target),
+  'branch.merge': async (repoId, req) => integrate.mergeBranch(repo(repoId), req),
+  'branch.rebasePreview': async (repoId, branch, onto) =>
+    integrate.rebasePreview(repo(repoId), branch, onto),
+  'branch.rebaseOnto': async (repoId, req) => integrate.rebaseOnto(repo(repoId), req),
+
+  'tracking.report': async (repoId) => tracking.trackingReport(repo(repoId)),
+  'tracking.publish': async (repoId, remote, items) =>
+    tracking.publishBranches(repo(repoId), remote, items, progress(repoId)),
+  'tracking.setUpstreams': async (repoId, changes) => tracking.setUpstreams(repo(repoId), changes),
+  'tracking.createLocal': async (repoId, items) =>
+    tracking.createLocalBranches(repo(repoId), items),
 
   'remote.fetch': async (repoId, remote, prune) =>
     remotes.fetch(repo(repoId), remote, prune, progress(repoId)),
@@ -166,12 +201,16 @@ const handlers: Handlers = {
 
   'commit.checkout': async (repoId, sha) => commits.checkoutDetached(repo(repoId), sha),
   'commit.cherryPick': async (repoId, sha) => commits.cherryPick(repo(repoId), sha),
+  'commit.cherryPickTo': async (repoId, sha, branch) =>
+    commits.cherryPickTo(repo(repoId), sha, branch),
   'commit.revert': async (repoId, sha) => commits.revert(repo(repoId), sha),
   'commit.reset': async (repoId, sha, mode) => commits.reset(repo(repoId), sha, mode),
 
-  'op.continue': async (repoId) => op.continueOp(repo(repoId)),
-  'op.abort': async (repoId) => op.abortOp(repo(repoId)),
-  'op.skip': async (repoId) => op.skipOp(repo(repoId)),
+  'op.continue': async (repoId) => rebase.stepOperation(repo(repoId), 'continue'),
+  'op.abort': async (repoId) => rebase.abortOperation(repo(repoId)),
+  'op.skip': async (repoId) => {
+    await rebase.stepOperation(repo(repoId), 'skip')
+  },
 
   'history.range': async (repoId, tip, base) => history.loadRange(repo(repoId), tip, base),
   'history.apply': async (repoId, plan) => history.applyPlan(repo(repoId), plan, progress(repoId)),
@@ -204,6 +243,41 @@ const handlers: Handlers = {
 
   'reflog.list': async (repoId, ref, limit) => reflog.listReflog(repo(repoId), ref, limit),
 
+  'file.blame': async (repoId, path, rev) => blame.blameFile(repo(repoId), path, rev),
+  'file.ignore': async (repoId, req) => ignore.addIgnore(repo(repoId), req),
+
+  'bisect.state': async (repoId) => bisect.bisectState(repo(repoId)),
+  'bisect.start': async (repoId, bad, good) => bisect.bisectStart(repo(repoId), bad, good),
+  'bisect.mark': async (repoId, verdict, rev) => bisect.bisectMark(repo(repoId), verdict, rev),
+  'bisect.reset': async (repoId) => bisect.bisectReset(repo(repoId)),
+
+  'worktrees.list': async (repoId) => worktrees.listWorktrees(repo(repoId)),
+  'worktrees.add': async (repoId, req) => {
+    const top = repo(repoId)
+    // GITPRO_TEST_PICK_DIR lets end-to-end tests skip the folder dialog.
+    const parent =
+      process.env.GITPRO_TEST_PICK_DIR ??
+      (await pickDirectory(`Choose the folder to create the “${req.branch}” worktree in`, true))
+    if (!parent) return null
+    return worktrees.addWorktree(top, worktrees.worktreePath(parent, top, req.branch), req)
+  },
+  'worktrees.remove': async (repoId, path, force) =>
+    worktrees.removeWorktree(repo(repoId), path, force),
+  'worktrees.prune': async (repoId) => worktrees.pruneWorktrees(repo(repoId)),
+  'worktrees.open': async (repoId, path) => {
+    const w = await worktrees.findWorktree(repo(repoId), path)
+    if (w.bare || w.prunable) throw new Error('This worktree cannot be opened')
+    return openRepo(w.path)
+  },
+
+  'signing.get': async (repoId) => signing.getSigning(repo(repoId)),
+  'signing.keys': async (repoId) => {
+    repo(repoId)
+    return signing.listSigningKeys()
+  },
+  'signing.set': async (repoId, scope, config) => signing.setSigning(repo(repoId), scope, config),
+  'signing.test': async (repoId) => signing.testSigning(repo(repoId)),
+
   'backup.list': async (repoId) => backup.listBackups(repo(repoId)),
   'backup.restore': async (repoId, ref, mode, newName) =>
     backup.restoreBackup(repo(repoId), ref, mode, newName),
@@ -218,6 +292,7 @@ function isTrustedSender(event: IpcMainInvokeEvent, rendererUrl: string | undefi
 
 export function registerIpc(rendererUrl: string | undefined): void {
   setCommandLogSink((entry) => broadcast({ type: 'command', entry }))
+  terminal.setTerminalSink(broadcast)
   ipcMain.handle(INVOKE_CHANNEL, async (event, method: string, args: unknown[]) => {
     if (!isTrustedSender(event, rendererUrl)) {
       return { ok: false, error: { message: 'Untrusted sender' } } satisfies InvokeEnvelope<never>
@@ -250,4 +325,5 @@ export function registerIpc(rendererUrl: string | undefined): void {
 export function stopWatchers(): void {
   for (const w of openRepos.values()) w.stop()
   openRepos.clear()
+  terminal.killAllTerminals()
 }

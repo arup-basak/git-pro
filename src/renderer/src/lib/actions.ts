@@ -2,6 +2,9 @@ import { nowGitDate } from '@shared/dates'
 import type {
   AppStash,
   GitDate,
+  HistoryAction,
+  LineAction,
+  LineSelection,
   ResetMode,
   StackStash,
   StashTarget,
@@ -9,6 +12,7 @@ import type {
 } from '@shared/types'
 import { QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import type { DropAction } from './dnd'
 import { confirmDialog, openForm } from './dialogs'
 import { call, errorParts } from './api'
 import { short } from './format'
@@ -90,6 +94,30 @@ export async function discardChanges(list: StatusEntry[]): Promise<boolean> {
     'Changes discarded'
   )
   return true
+}
+
+/** Stages, unstages or discards some lines of one file. Resolves to true when it ran. */
+export async function applyLines(action: LineAction, sel: LineSelection): Promise<boolean> {
+  const n = sel.changes.length
+  if (!n) return false
+  if (action === 'discard') {
+    const ok = await confirmDialog({
+      title: `Discard ${n} changed line${n === 1 ? '' : 's'}?`,
+      message: `In ${sel.path}.\n\nThis cannot be undone. Consider stashing the lines instead.`,
+      confirmLabel: 'Discard',
+      danger: true
+    })
+    if (!ok) return false
+  }
+  const done = await run(
+    async () => {
+      await call('worktree.applyLines', repoId(), action, sel)
+      return true
+    },
+    action === 'discard' ? `Discarded ${n} line${n === 1 ? '' : 's'}` : undefined,
+    action === 'stage' ? 'Could not stage' : action === 'unstage' ? 'Could not unstage' : undefined
+  )
+  return done === true
 }
 
 /* ---------- branches ---------- */
@@ -263,6 +291,74 @@ export async function revertCommit(sha: string): Promise<void> {
     )
 }
 
+/**
+ * Cherry-picks onto a branch that is not checked out (working tree untouched). If that would
+ * conflict, offers to check the branch out and cherry-pick there, where the merge editor helps.
+ */
+export async function cherryPickOnto(sha: string, branch: string): Promise<void> {
+  const id = repoId()
+  try {
+    await call('commit.cherryPickTo', id, sha, branch)
+    toast.success(`Cherry-picked ${short(sha)} onto ${branch}`, {
+      description: 'Your working tree was not touched. The old position is kept in Backups.'
+    })
+  } catch (e) {
+    const { message } = errorParts(e)
+    if (!/conflicts in/.test(message)) {
+      showError(e, 'Could not cherry-pick')
+      return
+    }
+    const ok = await confirmDialog({
+      title: 'This cherry-pick conflicts',
+      message: `${message}.\n\nCheck out ${branch} and cherry-pick there? The conflicts then open in the merge editor.`,
+      confirmLabel: `Check out ${branch}`
+    })
+    if (!ok) return
+    try {
+      await call('branch.checkout', id, branch)
+    } catch (err) {
+      showError(err, `Could not check out ${branch}`)
+      return
+    }
+    await cherryPick(sha)
+  } finally {
+    void invalidateRepo(queryClient, id)
+  }
+}
+
+/** Points a branch that is not checked out at another commit (backed up first). */
+export async function moveBranchTo(branch: string, sha: string): Promise<void> {
+  const ok = await confirmDialog({
+    title: `Move ${branch} to ${short(sha)}?`,
+    message: `${branch} will point at ${short(sha)}. Its current position is kept in Backups, so this can be undone.`,
+    confirmLabel: 'Move branch',
+    danger: true
+  })
+  if (ok) {
+    await run(() => call('branch.move', repoId(), branch, sha), `Moved ${branch} to ${short(sha)}`)
+  }
+}
+
+/** Carries out a choice from the drop menu (drag and drop in the graph and sidebar). */
+export async function runDropAction(a: DropAction): Promise<void> {
+  const ui = useUi.getState()
+  switch (a.kind) {
+    case 'cherry-pick':
+      return a.current ? cherryPick(a.sha) : cherryPickOnto(a.sha, a.branch)
+    case 'move':
+      return a.current ? resetTo(a.sha, a.branch) : moveBranchTo(a.branch, a.sha)
+    case 'rebase':
+      ui.openIntegrate({ kind: 'rebase', branch: a.branch, onto: a.onto })
+      return
+    case 'merge':
+      ui.openIntegrate({ kind: 'merge', source: a.source, target: a.target })
+      return
+    case 'push':
+      ui.openPush({ sourceKind: a.sourceKind, source: a.source, remote: a.remote, dest: a.dest })
+      return
+  }
+}
+
 export async function resetTo(sha: string, branch: string | null): Promise<void> {
   const v = await openForm<{ mode: ResetMode }>({
     title: `Reset ${branch ?? 'HEAD'} to ${short(sha)}`,
@@ -298,9 +394,14 @@ export async function resetTo(sha: string, branch: string | null): Promise<void>
   await run(() => call('commit.reset', repoId(), sha, v.mode), `Reset to ${short(sha)}`)
 }
 
-export function editHistoryFrom(sha: string, parent: string | null, tip?: string): void {
+export function editHistoryFrom(
+  sha: string,
+  parent: string | null,
+  tip?: string,
+  preset?: Record<string, HistoryAction>
+): void {
   const ui = useUi.getState()
-  ui.openHistory({ tip: tip ?? ui.graphRef ?? 'HEAD', base: { sha: parent }, focus: sha })
+  ui.openHistory({ tip: tip ?? ui.graphRef ?? 'HEAD', base: { sha: parent }, focus: sha, preset })
 }
 
 /* ---------- tags ---------- */
@@ -380,7 +481,9 @@ export async function deleteRemoteTag(remote: string, name: string): Promise<voi
 
 /* ---------- stash ---------- */
 
-export function stashSave(opts: { paths?: string[]; staged?: boolean } = {}): void {
+export function stashSave(
+  opts: { paths?: string[]; staged?: boolean; selections?: LineSelection[] } = {}
+): void {
   useUi.getState().openStashDialog(opts)
 }
 
@@ -586,7 +689,15 @@ export async function removeRemote(name: string): Promise<void> {
 /* ---------- in-progress operations ---------- */
 
 export const opContinue = (): Promise<unknown> =>
-  run(() => call('op.continue', repoId()), 'Continued', 'Could not continue')
+  run(
+    async () => {
+      const r = await call('op.continue', repoId())
+      if (r) useUi.getState().showRewriteResult(r)
+      return r
+    },
+    (r) => (r ? null : 'Continued'),
+    'Could not continue'
+  )
 export const opSkip = (): Promise<unknown> => run(() => call('op.skip', repoId()), 'Skipped')
 
 export async function opAbort(kind: string): Promise<void> {

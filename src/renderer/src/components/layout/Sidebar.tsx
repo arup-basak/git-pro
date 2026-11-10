@@ -1,19 +1,30 @@
 import {
   Archive,
+  Cable,
   Inbox,
   Pin,
   ChevronDown,
   ChevronRight,
   Cloud,
+  CloudAlert,
+  CloudOff,
+  CloudUpload,
   FileDiff,
+  FolderTree,
+  ScanSearch,
   GitBranch,
+  GitBranchPlus,
   GitFork,
   History,
+  Link2,
+  Link2Off,
   LifeBuoy,
   ShieldCheck,
   Plus,
-  Tag
+  Tag,
+  Trash2
 } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
 import { useState, type ReactNode } from 'react'
 import {
   addRemote,
@@ -33,9 +44,28 @@ import {
   setUpstream,
   stashSave
 } from '../../lib/actions'
+import {
+  dragSource,
+  dropTarget,
+  useDropHover,
+  type DragPayload,
+  type DropTarget
+} from '../../lib/dnd'
+import { call } from '../../lib/api'
+import { addWorktree, openWorktree, removeWorktree } from '../../lib/everyday'
 import { cx, relative } from '../../lib/format'
-import { useBackups, useRefs, useStashes, useStatus } from '../../lib/queries'
+import { keys, useBackups, useRefs, useRepoId, useStashes, useStatus } from '../../lib/queries'
 import { useUi, type View } from '../../lib/store'
+import {
+  branchTrackingEntries,
+  createLocalBranches,
+  describeTracking,
+  publishBranch,
+  republishTarget,
+  trackUpstream,
+  useTracking
+} from '../../lib/tracking'
+import type { BranchTracking } from '@shared/tracking'
 import { WithContextMenu, type MenuEntry } from '../ui'
 
 function Section({
@@ -51,7 +81,9 @@ function Section({
   right?: ReactNode
   defaultOpen?: boolean
 }) {
-  const [open, setOpen] = useState(defaultOpen)
+  // Follows `defaultOpen` (which may depend on data still loading) until the user toggles it.
+  const [toggled, setOpen] = useState<boolean | null>(null)
+  const open = toggled ?? defaultOpen
   return (
     <div className="mb-1">
       <div className="group flex h-7 items-center px-2 text-[11px] font-semibold tracking-wide text-faint uppercase">
@@ -92,7 +124,7 @@ function Item({
       onClick={onClick}
       onDoubleClick={onDoubleClick}
       className={cx(
-        'mx-1 flex h-[26px] cursor-default items-center gap-2 rounded px-2 text-[13px]',
+        'group/row mx-1 flex h-[26px] cursor-default items-center gap-2 rounded px-2 text-[13px]',
         active ? 'bg-accent-strong/25 text-fg' : 'hover:bg-hover',
         muted && 'text-muted'
       )}
@@ -137,21 +169,163 @@ function NavItem({
   )
 }
 
+/** Makes a sidebar row draggable and a drop target, with a highlight while hovered. */
+function DragDropRow({
+  payload,
+  target,
+  dropKey,
+  children
+}: {
+  payload: DragPayload
+  target: DropTarget
+  dropKey: string
+  children: ReactNode
+}) {
+  const hover = useDropHover(dropKey)
+  return (
+    <div
+      {...dragSource(payload)}
+      {...dropTarget(target, dropKey)}
+      className={cx('rounded', hover && 'bg-accent/10 ring-1 ring-accent ring-inset')}
+    >
+      {children}
+    </div>
+  )
+}
+
+/** A small icon button on a sidebar row; clicks don't select or open the row. */
+function RowAction({
+  title,
+  onClick,
+  className,
+  children
+}: {
+  title: string
+  onClick: () => void
+  className?: string
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      className={cx('rounded p-0.5 text-faint hover:bg-hover hover:text-fg', className)}
+      onClick={(e) => {
+        e.stopPropagation()
+        onClick()
+      }}
+      onDoubleClick={(e) => e.stopPropagation()}
+    >
+      {children}
+    </button>
+  )
+}
+
+/** Ahead/behind for a tracking branch, or a mark for a branch that is not connected. */
+function TrackingMark({
+  state,
+  ahead,
+  behind,
+  hasRemotes
+}: {
+  state: BranchTracking | undefined
+  ahead?: number
+  behind?: number
+  hasRemotes: boolean
+}) {
+  switch (state?.kind) {
+    case 'tracking':
+      return (
+        <span className="text-[11px] text-faint">
+          {`${ahead ? `↑${ahead}` : ''}${behind ? `↓${behind}` : ''}`}
+        </span>
+      )
+    case 'gone':
+      return <span className="text-[11px] text-bad">gone</span>
+    case 'unlinked':
+      return <Link2Off size={11} className="text-faint" aria-label="not tracking" />
+    case 'unpublished':
+      return hasRemotes ? (
+        <CloudOff size={11} className="text-faint" aria-label="not published" />
+      ) : null
+    default:
+      return null
+  }
+}
+
 export function Sidebar() {
   const ui = useUi()
   const refs = useRefs()
   const status = useStatus()
   const stashes = useStashes()
   const backups = useBackups()
+  const repoId = useRepoId()
+  const worktrees = useQuery({
+    queryKey: keys.worktrees(repoId),
+    queryFn: () => call('worktrees.list', repoId)
+  })
   const data = refs.data
   const remotes = data?.remotes ?? []
   const remoteShorts = (data?.remoteBranches ?? []).map((r) => r.short)
+  const tracking = useTracking()
+  const localNames = new Set((data?.branches ?? []).map((b) => b.name))
+  const remoteOnly = new Set((tracking?.remoteOnly ?? []).map((r) => r.short))
+
+  /** The one-click fix shown when hovering a branch that is not connected to a remote. */
+  const quickFix = (
+    name: string,
+    t: BranchTracking | undefined
+  ): { title: string; icon: ReactNode; run: () => void } | null => {
+    if (t?.kind === 'unpublished' && tracking?.defaultRemote) {
+      const r = tracking.defaultRemote
+      return {
+        title: `Publish to ${r}/${name} and track it`,
+        icon: <CloudUpload size={12} />,
+        run: () => void publishBranch(name, r)
+      }
+    }
+    if (t?.kind === 'unlinked') {
+      return {
+        title: `Track ${t.candidate}`,
+        icon: <Link2 size={12} />,
+        run: () => void trackUpstream(name, t.candidate)
+      }
+    }
+    if (t?.kind === 'gone' && data) {
+      const target = republishTarget(t.upstream, data)
+      if (target)
+        return {
+          title: `Publish again to ${t.upstream}`,
+          icon: <CloudUpload size={12} />,
+          run: () => void publishBranch(name, target.remote, target.dest)
+        }
+    }
+    return null
+  }
 
   const showRef = (ref: string, sha: string): void => {
     ui.setGraphRef(ref)
     ui.select(sha)
     ui.setView('graph')
   }
+
+  const cur = data?.currentBranch ?? null
+  /** "Merge X into <current>…" / "Rebase <current> onto X…" for any ref other than the current branch. */
+  const integrateEntries = (ref: string): MenuEntry[] =>
+    cur && ref !== cur
+      ? [
+          {
+            label: `Merge ${ref} into ${cur}…`,
+            onSelect: () => ui.openIntegrate({ kind: 'merge', source: ref, target: cur })
+          },
+          {
+            label: `Rebase ${cur} onto ${ref}…`,
+            onSelect: () => ui.openIntegrate({ kind: 'rebase', branch: cur, onto: ref })
+          },
+          { separator: true }
+        ]
+      : []
 
   const branchMenu = (
     name: string,
@@ -173,9 +347,37 @@ export function Sidebar() {
     },
     { label: 'Edit history…', onSelect: () => ui.openHistory({ tip: name, base: { count: 10 } }) },
     { separator: true },
+    ...(current
+      ? [
+          {
+            label: `Merge into ${name}…`,
+            onSelect: () => ui.openIntegrate({ kind: 'merge', target: name })
+          },
+          {
+            label: `Rebase ${name} onto…`,
+            onSelect: () => ui.openIntegrate({ kind: 'rebase', branch: name })
+          },
+          { separator: true }
+        ]
+      : integrateEntries(name)),
     { label: 'New branch from here…', onSelect: () => void createBranchAt(sha, name) },
+    {
+      label: 'Check out in a new worktree…',
+      disabled: current,
+      onSelect: () => void addWorktree(name)
+    },
     { label: 'Rename…', onSelect: () => void renameBranch(name) },
+    { separator: true },
+    ...(data
+      ? branchTrackingEntries(
+          name,
+          tracking?.byBranch.get(name),
+          data,
+          tracking?.defaultRemote ?? null
+        )
+      : []),
     { label: 'Set upstream…', onSelect: () => void setUpstream(name, remoteShorts, upstream) },
+    { label: 'Branch tracking…', onSelect: () => ui.setTrackingOpen(true) },
     { separator: true },
     { label: 'Copy name', onSelect: () => copy(name) },
     { label: 'Delete…', danger: true, disabled: current, onSelect: () => void deleteBranch(name) }
@@ -217,30 +419,158 @@ export function Sidebar() {
           label="Backups"
           count={backups.data?.length || undefined}
         />
+        {ui.file && (
+          <NavItem
+            view="file"
+            icon={<ScanSearch size={14} className="text-muted" />}
+            label={`${ui.file.tab === 'blame' ? 'Blame' : 'History'} · ${ui.file.path.split('/').pop()}`}
+          />
+        )}
       </div>
 
-      <Section title="Branches" count={data?.branches.length}>
-        {data?.branches.map((b) => (
+      <Section
+        title="Branches"
+        count={data?.branches.length}
+        right={
+          tracking && tracking.issues > 0 ? (
+            <button
+              title={`${tracking.issues} branch${tracking.issues === 1 ? ' is' : 'es are'} not connected to a remote — Branch tracking…`}
+              aria-label="Branch tracking"
+              className="flex items-center gap-1 rounded px-1 py-0.5 font-normal text-warn hover:bg-hover"
+              onClick={() => ui.setTrackingOpen(true)}
+            >
+              <CloudAlert size={12} />
+              {tracking.issues}
+            </button>
+          ) : (
+            <button
+              title="Branch tracking…"
+              aria-label="Branch tracking"
+              className="rounded p-0.5 opacity-0 group-hover:opacity-100 hover:bg-hover hover:text-fg"
+              onClick={() => ui.setTrackingOpen(true)}
+            >
+              <Cable size={12} />
+            </button>
+          )
+        }
+      >
+        {data?.branches.map((b) => {
+          const t = tracking?.byBranch.get(b.name)
+          const fix = quickFix(b.name, t)
+          return (
+            <WithContextMenu
+              key={b.name}
+              entries={() => branchMenu(b.name, b.sha, b.upstream, b.current)}
+            >
+              <div>
+                <DragDropRow
+                  payload={{ kind: 'branch', name: b.name, remote: false }}
+                  target={{ kind: 'branch', name: b.name, current: b.current }}
+                  dropKey={`side:branch:${b.name}`}
+                >
+                  <Item
+                    icon={
+                      <GitBranch size={13} className={b.current ? 'text-accent' : 'text-muted'} />
+                    }
+                    label={<span className={b.current ? 'font-semibold' : ''}>{b.name}</span>}
+                    active={ui.view === 'graph' && ui.graphRef === b.name}
+                    title={`${b.subject}\n${relative(b.date)}\n${describeTracking(t, remotes.length > 0)}${fix ? ` — hover to ${fix.title.charAt(0).toLowerCase()}${fix.title.slice(1)}` : ''}\nDouble-click to check out`}
+                    onClick={() => showRef(b.name, b.sha)}
+                    onDoubleClick={() => !b.current && void checkoutBranch(b.name)}
+                    right={
+                      <>
+                        <span className={cx('flex items-center', fix && 'group-hover/row:hidden')}>
+                          <TrackingMark
+                            state={t}
+                            ahead={b.ahead}
+                            behind={b.behind}
+                            hasRemotes={remotes.length > 0}
+                          />
+                        </span>
+                        {fix && (
+                          <RowAction
+                            title={fix.title}
+                            className="hidden group-hover/row:inline-flex"
+                            onClick={fix.run}
+                          >
+                            {fix.icon}
+                          </RowAction>
+                        )}
+                        {/* The checked-out branch can't be deleted; keep its slot so counts line up. */}
+                        <button
+                          type="button"
+                          title={`Delete ${b.name}…`}
+                          aria-label={`Delete branch ${b.name}`}
+                          disabled={b.current}
+                          className={cx(
+                            '-mr-1 rounded p-0.5 text-faint opacity-0 group-hover/row:opacity-100 hover:bg-bad/20 hover:text-bad focus-visible:opacity-100',
+                            b.current && 'invisible'
+                          )}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            void deleteBranch(b.name)
+                          }}
+                          onDoubleClick={(e) => e.stopPropagation()}
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </>
+                    }
+                  />
+                </DragDropRow>
+              </div>
+            </WithContextMenu>
+          )
+        })}
+      </Section>
+
+      <Section
+        title="Worktrees"
+        count={worktrees.data?.length}
+        defaultOpen={(worktrees.data?.length ?? 0) > 1}
+        right={
+          <button
+            title="New worktree…"
+            className="rounded p-0.5 opacity-0 group-hover:opacity-100 hover:bg-line-strong"
+            onClick={() => void addWorktree()}
+          >
+            <Plus size={12} />
+          </button>
+        }
+      >
+        {worktrees.data?.map((w) => (
           <WithContextMenu
-            key={b.name}
-            entries={() => branchMenu(b.name, b.sha, b.upstream, b.current)}
+            key={w.path}
+            entries={() => [
+              {
+                label: 'Open',
+                disabled: w.current || w.bare || w.prunable,
+                onSelect: () => void openWorktree(w.path)
+              },
+              { label: 'Copy path', onSelect: () => copy(w.path, 'Path copied') },
+              { separator: true },
+              {
+                label: 'Remove…',
+                danger: true,
+                disabled: w.main || w.current,
+                onSelect: () => void removeWorktree(w)
+              }
+            ]}
           >
             <div>
               <Item
-                icon={<GitBranch size={13} className={b.current ? 'text-accent' : 'text-muted'} />}
-                label={<span className={b.current ? 'font-semibold' : ''}>{b.name}</span>}
-                active={ui.view === 'graph' && ui.graphRef === b.name}
-                title={`${b.subject}\n${relative(b.date)}${b.upstream ? `\ntracks ${b.upstream}` : ''}\nDouble-click to check out`}
-                onClick={() => showRef(b.name, b.sha)}
-                onDoubleClick={() => !b.current && void checkoutBranch(b.name)}
+                icon={<FolderTree size={13} className={w.current ? 'text-accent' : 'text-muted'} />}
+                label={
+                  <span className={w.current ? 'font-semibold' : ''}>
+                    {w.branch ?? (w.bare ? 'bare' : 'detached')}
+                  </span>
+                }
+                title={`${w.path}${w.current ? '\n(open here)' : '\nDouble-click to open'}${w.locked ? '\nlocked' : ''}${w.prunable ? '\nfolder missing (prunable)' : ''}`}
+                onDoubleClick={() => !w.current && void openWorktree(w.path)}
                 right={
-                  b.upstream ? (
-                    <span className={cx('text-[11px]', b.gone ? 'text-bad' : 'text-faint')}>
-                      {b.gone
-                        ? 'gone'
-                        : `${b.ahead ? `↑${b.ahead}` : ''}${b.behind ? `↓${b.behind}` : ''}`}
-                    </span>
-                  ) : undefined
+                  <span className="max-w-[110px] truncate text-[11px] text-faint">
+                    {w.prunable ? 'missing' : w.path.split('/').pop()}
+                  </span>
                 }
               />
             </div>
@@ -290,46 +620,108 @@ export function Sidebar() {
               ),
               body: data?.remoteBranches
                 .filter((rb) => rb.remote === r.name)
-                .map((rb) => (
-                  <WithContextMenu
-                    key={rb.short}
-                    entries={() => [
-                      {
-                        label: 'Check out as local branch…',
-                        onSelect: () => void checkoutRemoteBranch(rb.short, rb.name)
-                      },
-                      {
-                        label: 'New branch from here…',
-                        onSelect: () => void createBranchAt(rb.sha, rb.short)
-                      },
-                      {
-                        label: 'Push something to this branch…',
-                        onSelect: () => ui.openPush({ remote: r.name, dest: rb.name })
-                      },
-                      {
-                        label: 'Edit history…',
-                        onSelect: () => ui.openHistory({ tip: rb.short, base: { count: 10 } })
-                      },
-                      { separator: true },
-                      { label: 'Copy name', onSelect: () => copy(rb.short) },
-                      {
-                        label: `Delete on ${r.name}…`,
-                        danger: true,
-                        onSelect: () => void deleteRemoteBranch(r.name, rb.name)
-                      }
-                    ]}
-                  >
-                    <div className="pl-4">
-                      <Item
-                        icon={<GitBranch size={12} className="text-faint" />}
-                        label={rb.name}
-                        active={ui.view === 'graph' && ui.graphRef === rb.short}
-                        title={`${rb.subject}\n${relative(rb.date)}`}
-                        onClick={() => showRef(rb.short, rb.sha)}
-                      />
-                    </div>
-                  </WithContextMenu>
-                ))
+                .map((rb) => {
+                  const localTracker = tracking?.trackedBy.get(rb.short)
+                  const isRemoteOnly = remoteOnly.has(rb.short)
+                  const sameName = localNames.has(rb.name) && localTracker !== rb.name
+                  const createLocal = (): void =>
+                    void createLocalBranches([{ remoteBranch: rb.short, name: rb.name }])
+                  return (
+                    <WithContextMenu
+                      key={rb.short}
+                      entries={() => [
+                        {
+                          label: 'Check out as local branch…',
+                          onSelect: () => void checkoutRemoteBranch(rb.short, rb.name)
+                        },
+                        ...(isRemoteOnly
+                          ? [
+                              {
+                                label: `Create local ${rb.name} (don’t check out)`,
+                                onSelect: createLocal
+                              }
+                            ]
+                          : []),
+                        ...(sameName
+                          ? [
+                              {
+                                label: `Make local ${rb.name} track this`,
+                                onSelect: () => void trackUpstream(rb.name, rb.short)
+                              }
+                            ]
+                          : []),
+                        ...(localTracker
+                          ? [
+                              {
+                                label: `Show local ${localTracker}`,
+                                hint: 'tracks this',
+                                onSelect: () => {
+                                  const lb = data?.branches.find((b) => b.name === localTracker)
+                                  if (lb) showRef(lb.name, lb.sha)
+                                }
+                              }
+                            ]
+                          : []),
+                        { separator: true },
+                        ...integrateEntries(rb.short),
+                        {
+                          label: 'New branch from here…',
+                          onSelect: () => void createBranchAt(rb.sha, rb.short)
+                        },
+                        {
+                          label: 'Push something to this branch…',
+                          onSelect: () => ui.openPush({ remote: r.name, dest: rb.name })
+                        },
+                        {
+                          label: 'Edit history…',
+                          onSelect: () => ui.openHistory({ tip: rb.short, base: { count: 10 } })
+                        },
+                        { separator: true },
+                        { label: 'Copy name', onSelect: () => copy(rb.short) },
+                        {
+                          label: `Delete on ${r.name}…`,
+                          danger: true,
+                          onSelect: () => void deleteRemoteBranch(r.name, rb.name)
+                        }
+                      ]}
+                    >
+                      <div className="pl-4">
+                        <DragDropRow
+                          payload={{ kind: 'branch', name: rb.short, remote: true }}
+                          target={{ kind: 'remote', short: rb.short }}
+                          dropKey={`side:remote:${rb.short}`}
+                        >
+                          <Item
+                            icon={<GitBranch size={12} className="text-faint" />}
+                            label={rb.name}
+                            active={ui.view === 'graph' && ui.graphRef === rb.short}
+                            title={`${rb.subject}\n${relative(rb.date)}${localTracker ? `\ntracked by local ${localTracker}` : isRemoteOnly ? '\nno local branch — hover to create one' : sameName ? `\nlocal ${rb.name} does not track this` : ''}`}
+                            onClick={() => showRef(rb.short, rb.sha)}
+                            right={
+                              isRemoteOnly ? (
+                                <RowAction
+                                  title={`Create local ${rb.name} tracking ${rb.short}`}
+                                  className="opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100"
+                                  onClick={createLocal}
+                                >
+                                  <GitBranchPlus size={12} />
+                                </RowAction>
+                              ) : sameName ? (
+                                <RowAction
+                                  title={`Make local ${rb.name} track ${rb.short}`}
+                                  className="opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100"
+                                  onClick={() => void trackUpstream(rb.name, rb.short)}
+                                >
+                                  <Link2 size={12} />
+                                </RowAction>
+                              ) : undefined
+                            }
+                          />
+                        </DragDropRow>
+                      </div>
+                    </WithContextMenu>
+                  )
+                })
             }}
           </RemoteGroup>
         ))}
@@ -343,6 +735,7 @@ export function Sidebar() {
               { label: 'Show in graph', onSelect: () => showRef(`refs/tags/${t.name}`, t.sha) },
               { label: 'New branch from tag…', onSelect: () => void createBranchAt(t.sha, t.name) },
               { separator: true },
+              ...integrateEntries(t.name),
               ...remotes.map((r) => ({
                 label: `Push to ${r.name}`,
                 onSelect: () => void pushTag(r.name, t.name)

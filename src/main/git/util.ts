@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { git, gitOut } from './runner'
 
@@ -72,4 +72,45 @@ export async function isDirty(cwd: string): Promise<boolean> {
 
 export function pathInGitDir(dir: string, ...parts: string[]): string {
   return join(dir, ...parts)
+}
+
+let tmpIndexSeq = 0
+
+/**
+ * Runs `fn` with an environment that points git at a throwaway index file, so trees can be
+ * built without touching the real index. The file is removed afterwards.
+ */
+export async function withTempIndex<T>(
+  cwd: string,
+  fn: (env: Record<string, string>) => Promise<T>
+): Promise<T> {
+  const dir = join(await gitDir(cwd), 'git-pro')
+  mkdirSync(dir, { recursive: true })
+  const file = join(dir, `tmp-index-${process.pid}-${Date.now()}-${tmpIndexSeq++}`)
+  try {
+    return await fn({ GIT_INDEX_FILE: file })
+  } finally {
+    rmSync(file, { force: true })
+  }
+}
+
+/**
+ * Like withTempIndex, but the temporary index starts as a copy of the real one. Reading trees
+ * this way never takes the real index.lock, so background previews cannot make the user's own
+ * git commands fail with "index.lock exists".
+ */
+export async function withIndexCopy<T>(
+  cwd: string,
+  fn: (env: Record<string, string>) => Promise<T>
+): Promise<T> {
+  const real = join(await gitDir(cwd), 'index')
+  return withTempIndex(cwd, async (env) => {
+    if (existsSync(real)) copyFileSync(real, env.GIT_INDEX_FILE)
+    return fn(env)
+  })
+}
+
+/** Tree of the current index, without locking it. */
+export async function indexTree(cwd: string): Promise<string> {
+  return withIndexCopy(cwd, (env) => gitOut(cwd, ['write-tree'], { env }))
 }

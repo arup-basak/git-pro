@@ -1,4 +1,4 @@
-import type { StashScope } from '@shared/types'
+import type { LineSelection, StashScope } from '@shared/types'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { queryClient } from '../../lib/actions'
@@ -13,16 +13,29 @@ import {
   useStatus
 } from '../../lib/queries'
 import { useUi } from '../../lib/store'
-import { Button, Checkbox, Modal } from '../ui'
+import { Button, Checkbox, Combobox, Modal } from '../ui'
 
 export function StashSaveDialog() {
   const dlg = useUi((s) => s.stashDialog)
   return dlg ? (
-    <StashSaveForm key={JSON.stringify(dlg)} paths={dlg.paths} staged={dlg.staged} />
+    <StashSaveForm
+      key={JSON.stringify(dlg)}
+      paths={dlg.paths}
+      staged={dlg.staged}
+      selections={dlg.selections}
+    />
   ) : null
 }
 
-function StashSaveForm({ paths, staged }: { paths?: string[]; staged?: boolean }) {
+function StashSaveForm({
+  paths,
+  staged,
+  selections
+}: {
+  paths?: string[]
+  staged?: boolean
+  selections?: LineSelection[]
+}) {
   const repoId = useRepoId()
   const ui = useUi()
   const status = useStatus()
@@ -34,19 +47,22 @@ function StashSaveForm({ paths, staged }: { paths?: string[]; staged?: boolean }
   const [group, setGroup] = useState('')
   const [notes, setNotes] = useState('')
   const [scope, setScope] = useState<StashScope>(
-    paths?.length ? 'paths' : staged ? 'staged' : 'all'
+    selections?.length ? 'lines' : paths?.length ? 'paths' : staged ? 'staged' : 'all'
   )
+  const lineCount = selections?.reduce((n, s) => n + s.changes.length, 0) ?? 0
   const [includeUntracked, setIncludeUntracked] = useState(true)
   const [keep, setKeep] = useState(false)
   const [busy, setBusy] = useState(false)
   const close = (): void => ui.closeStashDialog()
 
   const fileCount =
-    scope === 'paths'
-      ? (paths?.length ?? 0)
-      : scope === 'staged'
-        ? entries.filter((e) => !e.untracked && e.index !== '.').length
-        : entries.filter((e) => includeUntracked || !e.untracked).length
+    scope === 'lines'
+      ? (selections?.length ?? 0)
+      : scope === 'paths'
+        ? (paths?.length ?? 0)
+        : scope === 'staged'
+          ? entries.filter((e) => !e.untracked && e.index !== '.').length
+          : entries.filter((e) => includeUntracked || !e.untracked).length
 
   const submit = async (): Promise<void> => {
     setBusy(true)
@@ -57,6 +73,7 @@ function StashSaveForm({ paths, staged }: { paths?: string[]; staged?: boolean }
         group,
         scope,
         paths: scope === 'paths' ? paths : undefined,
+        selections: scope === 'lines' ? selections : undefined,
         includeUntracked,
         keepWorkingTree: keep
       })
@@ -78,6 +95,7 @@ function StashSaveForm({ paths, staged }: { paths?: string[]; staged?: boolean }
     ['staged', 'Staged only', hasStaged],
     ['paths', `Selected files${paths?.length ? ` (${paths.length})` : ''}`, !!paths?.length]
   ]
+  if (selections?.length) scopes.push(['lines', `Selected lines (${lineCount})`, true])
 
   return (
     <Modal
@@ -91,7 +109,11 @@ function StashSaveForm({ paths, staged }: { paths?: string[]; staged?: boolean }
           <Button onClick={close}>Cancel</Button>
           <Button variant="primary" disabled={busy || fileCount === 0} onClick={submit}>
             {keep ? 'Save snapshot' : 'Stash'}{' '}
-            {fileCount ? `${fileCount} file${fileCount === 1 ? '' : 's'}` : ''}
+            {scope === 'lines'
+              ? `${lineCount} line${lineCount === 1 ? '' : 's'}`
+              : fileCount
+                ? `${fileCount} file${fileCount === 1 ? '' : 's'}`
+                : ''}
           </Button>
         </>
       }
@@ -116,18 +138,12 @@ function StashSaveForm({ paths, staged }: { paths?: string[]; staged?: boolean }
         <div className="flex gap-3">
           <div className="flex flex-1 flex-col gap-1">
             <label className="text-xs font-medium text-muted">Group</label>
-            <input
-              className="field"
-              list="stash-groups"
+            <Combobox
               placeholder="none"
               value={group}
-              onChange={(e) => setGroup(e.target.value)}
+              onChange={setGroup}
+              options={(stashes.data?.groups ?? []).map((g) => ({ value: g }))}
             />
-            <datalist id="stash-groups">
-              {stashes.data?.groups.map((g) => (
-                <option key={g} value={g} />
-              ))}
-            </datalist>
           </div>
         </div>
         <div className="flex flex-col gap-1">
@@ -157,6 +173,18 @@ function StashSaveForm({ paths, staged }: { paths?: string[]; staged?: boolean }
               </button>
             ))}
           </div>
+          {scope === 'lines' && selections && (
+            <div className="mono mt-1 max-h-24 overflow-auto rounded border border-line bg-bg px-2 py-1 text-muted">
+              {selections.map((s) => (
+                <div key={s.path} className="truncate">
+                  {s.path}{' '}
+                  <span className="text-faint">
+                    · {s.changes.length} line{s.changes.length === 1 ? '' : 's'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
           {scope === 'paths' && paths && (
             <div className="mono mt-1 max-h-24 overflow-auto rounded border border-line bg-bg px-2 py-1 text-muted">
               {paths.map((p) => (
@@ -169,8 +197,8 @@ function StashSaveForm({ paths, staged }: { paths?: string[]; staged?: boolean }
         </div>
         <div className="flex flex-col gap-2">
           <Checkbox
-            checked={includeUntracked && scope !== 'staged'}
-            disabled={scope === 'staged'}
+            checked={includeUntracked && scope !== 'staged' && scope !== 'lines'}
+            disabled={scope === 'staged' || scope === 'lines'}
             onChange={setIncludeUntracked}
             label="Include untracked files"
           />

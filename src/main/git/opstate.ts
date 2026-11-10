@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { OpState } from '../../shared/types'
+import type { OpState, RebaseStop } from '../../shared/types'
 import { git } from './runner'
 import { gitDir } from './util'
 
@@ -10,6 +10,20 @@ function readTrim(path: string): string | null {
   } catch {
     return null
   }
+}
+
+/** Why a rebase is paused: conflicts, an `edit` stop, a `break`, or a failed `exec`. */
+function rebaseStop(base: string, conflicted: string[]): RebaseStop {
+  if (conflicted.length) return 'conflict'
+  if (existsSync(join(base, 'amend'))) return 'edit'
+  const last =
+    readTrim(join(base, 'done'))
+      ?.split('\n')
+      .filter((l) => l && !l.startsWith('#'))
+      .pop() ?? ''
+  if (/^(break|b)(\s|$)/.test(last)) return 'break'
+  if (/^(exec|x)\s/.test(last)) return 'exec'
+  return 'conflict' // stopped on a pick whose conflicts are resolved but not yet continued
 }
 
 export async function detectOp(cwd: string, conflicted: string[]): Promise<OpState> {
@@ -22,7 +36,16 @@ export async function detectOp(cwd: string, conflicted: string[]): Promise<OpSta
     const n = readTrim(join(base, 'msgnum')) ?? readTrim(join(base, 'next'))
     const total = readTrim(join(base, 'end')) ?? readTrim(join(base, 'last'))
     const step = n && total ? ` (${n}/${total})` : ''
-    return { kind: 'rebase', conflicted, detail: `Rebasing ${head}${step}` }
+    const stoppedSha = readTrim(join(base, 'stopped-sha')) ?? undefined
+    const stoppedSubject = readTrim(join(base, 'message'))?.split('\n')[0]
+    return {
+      kind: 'rebase',
+      conflicted,
+      detail: `Rebasing ${head}${step}`,
+      rebaseStop: rebaseStop(base, conflicted),
+      stoppedSha,
+      stoppedSubject
+    }
   }
   if (existsSync(join(dir, 'MERGE_HEAD'))) {
     return { kind: 'merge', conflicted, detail: 'Merge in progress' }

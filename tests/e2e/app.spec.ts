@@ -6,7 +6,14 @@ import {
   type Page
 } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 
@@ -17,7 +24,9 @@ const tmp = realpathSync(mkdtempSync(join(tmpdir(), 'gitpro-e2e-')))
 const home = join(tmp, 'home')
 const repoDir = join(tmp, 'demo-repo')
 const remoteDir = join(tmp, 'remote.git')
+const worktreesDir = join(tmp, 'worktrees')
 mkdirSync(home)
+mkdirSync(worktreesDir)
 writeFileSync(
   join(home, 'gitconfig'),
   '[user]\n  name = E2E User\n  email = e2e@example.com\n[init]\n  defaultBranch = main\n[commit]\n  gpgsign = false\n'
@@ -56,7 +65,12 @@ test.beforeAll(async () => {
   app = await electron.launch({
     args: ['.'],
     cwd: root,
-    env: { ...gitEnv, GITPRO_USER_DATA: join(tmp, 'userdata'), GITPRO_SEED_REPO: repoDir }
+    env: {
+      ...gitEnv,
+      GITPRO_USER_DATA: join(tmp, 'userdata'),
+      GITPRO_SEED_REPO: repoDir,
+      GITPRO_TEST_PICK_DIR: worktreesDir
+    }
   })
   page = await app.firstWindow()
   await page.setViewportSize({ width: 1480, height: 900 })
@@ -126,7 +140,7 @@ test('stashes into a named app stash, previews and applies it', async () => {
   await page.getByRole('button', { name: 'Stash', exact: true }).click()
   const dlg = page.getByRole('dialog')
   await dlg.locator('input[data-autofocus]').fill('e2e stash')
-  await dlg.locator('input[list="stash-groups"]').fill('experiments')
+  await dlg.getByPlaceholder('none', { exact: true }).fill('experiments')
   await dlg.getByRole('button', { name: /^Stash 2 files/ }).click()
   await expect(page.getByText('Stashed “e2e stash”')).toBeVisible()
   expect(git(repoDir, 'status', '--porcelain')).toBe('')
@@ -247,4 +261,240 @@ test('resolves a TypeScript conflict with the highlighted merge editor', async (
   expect(readFileSync(join(repoDir, 'hello.ts'), 'utf8')).toBe(
     'export const greeting: string = "merged by hand"\n// a comment\n'
   )
+})
+
+test('shows diffs side by side when switched on in View', async () => {
+  writeFileSync(join(repoDir, 'd.txt'), 'delta second\nextra line\n')
+  await page.locator('aside').getByText('Changes', { exact: true }).first().click()
+  await page.getByText('d.txt').first().click()
+  await expect(page.locator('main [data-diff-layout="unified"]')).toBeVisible()
+
+  await page.getByRole('button', { name: 'View' }).click()
+  await page.getByText('Side-by-side diffs', { exact: true }).click()
+  await page.keyboard.press('Escape')
+  const split = page.locator('main [data-diff-layout="split"]')
+  await expect(split).toBeVisible()
+  // The changed line sits next to its replacement: old text left, new text right.
+  const row = split.locator('tr', { hasText: 'delta prime' })
+  await expect(row).toContainText('delta second')
+  await shot('12-side-by-side')
+
+  // Back to unified for the following tests.
+  await page.getByRole('button', { name: 'View' }).click()
+  await page.getByText('Side-by-side diffs', { exact: true }).click()
+  await page.keyboard.press('Escape')
+  await expect(page.locator('main [data-diff-layout="unified"]')).toBeVisible()
+})
+
+test('stages one hunk, stashes a single line and applies it on top of new edits', async () => {
+  const rows = Array.from({ length: 20 }, (_, i) => `row ${i + 1}`)
+  commit('rows.txt', rows.join('\n') + '\n', 'rows', 1_700_040_000)
+  const edited = [...rows]
+  edited[1] = 'ROW 2'
+  edited[17] = 'ROW 18'
+  writeFileSync(join(repoDir, 'rows.txt'), edited.join('\n') + '\n')
+  const rowsFile = (): string => readFileSync(join(repoDir, 'rows.txt'), 'utf8')
+
+  await page.locator('aside').getByText('Changes', { exact: true }).first().click()
+  await page.getByText('rows.txt').first().click()
+  await page.getByRole('button', { name: 'Stage hunk' }).first().click()
+  await expect.poll(() => git(repoDir, 'diff', '--cached', '--', 'rows.txt')).toContain('+ROW 2')
+  expect(git(repoDir, 'diff', '--cached', '--', 'rows.txt')).not.toContain('ROW 18')
+  await shot('13-hunk-staged')
+
+  // Tick the single added line in the gutter and stash just that line.
+  const added = page.locator('main tr', { hasText: 'ROW 18' }).filter({ hasText: '+' })
+  await added.locator('td[title^="Select this line"]').click()
+  await expect(page.getByText('1 line selected')).toBeVisible()
+  await shot('14-line-selected')
+  await page.getByRole('button', { name: 'Stash lines…' }).click()
+  const dlg = page.getByRole('dialog')
+  await dlg.locator('input[data-autofocus]').fill('one line')
+  await dlg.getByRole('button', { name: 'Stash 1 line' }).click()
+  await expect(page.getByText('Stashed “one line”')).toBeVisible()
+  // The added line left the file; the staged hunk stayed staged.
+  await expect.poll(rowsFile).not.toContain('ROW 18')
+  expect(git(repoDir, 'diff', '--cached', '--', 'rows.txt')).toContain('+ROW 2')
+
+  // Keep editing the file, then bring the stashed line back on top of those edits.
+  git(repoDir, 'checkout', '--', 'rows.txt')
+  writeFileSync(join(repoDir, 'rows.txt'), rowsFile().replace('row 10\n', 'ROW 10\n'))
+  await page.locator('aside').getByText('Stashes', { exact: true }).first().click()
+  await page.getByText('one line').first().click()
+  await page.getByRole('button', { name: 'Preview apply' }).click()
+  await expect(page.getByText('Applies on top of your uncommitted edits')).toBeVisible()
+  await page.getByRole('button', { name: 'Apply & remove' }).click()
+  await expect.poll(rowsFile).toContain('ROW 18')
+  expect(rowsFile()).toContain('ROW 2\n')
+  expect(rowsFile()).toContain('ROW 10\n')
+})
+
+test('merges a branch and rebases onto another from the sidebar menu', async () => {
+  git(repoDir, 'add', '-A')
+  git(repoDir, 'commit', '-q', '-m', 'wip before merging')
+  git(repoDir, 'switch', '-q', '-c', 'topic')
+  commit('topic.txt', 'topic\n', 'topic work', 1_700_050_000)
+  git(repoDir, 'switch', '-q', 'main')
+  commit('main-side.txt', 'main\n', 'main side work', 1_700_050_100)
+
+  await page.locator('aside').getByText('topic', { exact: true }).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Merge topic into main…' }).click()
+  const dlg = page.getByRole('dialog')
+  await expect(dlg.getByText(/merges cleanly/)).toBeVisible()
+  await shot('15-merge-dialog')
+  await dlg.getByRole('button', { name: /^Merge topic into main/ }).click()
+  await expect(page.getByText('Merged topic into main')).toBeVisible()
+  expect(git(repoDir, 'log', '-1', '--format=%s', 'main')).toBe("Merge branch 'topic' into main")
+  expect(git(repoDir, 'for-each-ref', '--format=%(refname)', 'refs/git-pro/backups')).toContain(
+    '-merge/main'
+  )
+
+  // A side branch made from an older commit, then main rebased onto it as a new branch.
+  git(repoDir, 'switch', '-q', '-c', 'side', 'main~3')
+  commit('side.txt', 'side\n', 'side work', 1_700_050_200)
+  git(repoDir, 'switch', '-q', 'main')
+  await page.locator('aside').getByText('side', { exact: true }).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Rebase main onto side…' }).click()
+  await expect(dlg.getByText(/will be replayed onto side/)).toBeVisible()
+  await shot('16-rebase-dialog')
+  await dlg.getByRole('button', { name: 'Rebase main-rebased onto side' }).click()
+  await expect(page.getByText('Rebased main-rebased onto side')).toBeVisible()
+  expect(git(repoDir, 'log', '--format=%s', 'main-rebased')).toContain('side work')
+  expect(git(repoDir, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('main-rebased')
+  git(repoDir, 'switch', '-q', 'main')
+})
+
+test('edits what a commit contains through the History editor', async () => {
+  commit('edit-me.txt', 'version 1\n', 'edit me', 1_700_060_000)
+  commit('after.txt', 'after\n', 'after the edit', 1_700_060_100)
+  await page.locator('aside').getByText('All commits', { exact: true }).click()
+  // Wait for the refresh that follows the commits (and the switch back to main) above.
+  await expect(page.getByText('after the edit', { exact: true }).first()).toBeVisible()
+  await expect(page.getByTitle('Current branch')).toHaveText('main')
+  await page.getByText('edit me', { exact: true }).first().click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Edit contents of this commit…' }).click()
+  const sha = git(repoDir, 'rev-parse', 'HEAD~1')
+  await expect(page.locator(`#hrow-${sha}`).getByRole('combobox', { name: 'Action' })).toHaveText(
+    'edit'
+  )
+  await page.getByRole('button', { name: 'Create branch', exact: true }).click()
+
+  // The rebase pauses at the commit; the banner says which one.
+  await expect(page.getByText(/^Editing \w+ edit me$/)).toBeVisible()
+  await shot('17-editing-commit')
+  writeFileSync(join(repoDir, 'edit-me.txt'), 'version 2\n')
+  git(repoDir, 'add', 'edit-me.txt')
+  await page.getByRole('button', { name: 'Continue', exact: true }).click()
+
+  await expect(
+    page.getByRole('heading', { name: /Rebased main-edited-.*2 → 2 commits/ })
+  ).toBeVisible()
+  const branch = git(repoDir, 'rev-parse', '--abbrev-ref', 'HEAD')
+  expect(git(repoDir, 'show', `${branch}~1:edit-me.txt`)).toBe('version 2')
+  expect(git(repoDir, 'log', '-1', '--format=%s', branch)).toBe('after the edit')
+  expect(git(repoDir, 'show', 'main~1:edit-me.txt')).toBe('version 1')
+  await page.keyboard.press('Escape')
+  git(repoDir, 'switch', '-q', 'main')
+})
+
+test('drags a commit onto a branch badge to cherry-pick it there', async () => {
+  git(repoDir, 'branch', 'dnd-target', 'main')
+  commit('picked.txt', 'picked\n', 'pick me', 1_700_070_000)
+  await page.locator('aside').getByText('All commits', { exact: true }).click()
+  await expect(page.getByText('pick me', { exact: true }).first()).toBeVisible()
+  const badge = page.locator('main span', { hasText: /^dnd-target$/ }).first()
+  await expect(badge).toBeVisible()
+
+  await page.getByText('pick me', { exact: true }).first().dragTo(badge)
+  const sha = git(repoDir, 'rev-parse', '--short=8', 'main')
+  await expect(
+    page.getByRole('menuitem', { name: `Cherry-pick ${sha} onto dnd-target` })
+  ).toBeVisible()
+  await shot('18-drop-menu')
+  await page.getByRole('menuitem', { name: `Cherry-pick ${sha} onto dnd-target` }).click()
+  await expect(page.getByText(`Cherry-picked ${sha} onto dnd-target`)).toBeVisible()
+  expect(git(repoDir, 'log', '-1', '--format=%s', 'dnd-target')).toBe('pick me')
+  expect(git(repoDir, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('main')
+})
+
+test('blames a file and shows its history', async () => {
+  await page.locator('aside').getByText('All commits', { exact: true }).click()
+  await page.getByText('pick me', { exact: true }).first().click()
+  await page.locator('main').getByText('picked.txt').first().click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Blame', exact: true }).click()
+  const main = page.locator('main')
+  await expect(main.getByText('picked.txt', { exact: true }).first()).toBeVisible()
+  await expect(main.locator('td', { hasText: /^picked$/ })).toBeVisible()
+  await expect(main.getByRole('button', { name: /^[0-9a-f]{8}$/ }).first()).toBeVisible()
+  await shot('19-blame')
+  await main.getByRole('button', { name: 'History' }).click()
+  await expect(main.getByText('1 commit', { exact: true })).toBeVisible()
+  await expect(main.locator('td', { hasText: /^picked$/ }).first()).toBeVisible()
+})
+
+test('bisects to the first bad commit', async () => {
+  expect(git(repoDir, 'status', '--porcelain', '--untracked-files=no')).toBe('')
+  for (let i = 1; i <= 6; i++) {
+    commit('n.txt', `${i >= 4 ? 'broken' : 'ok'} ${i}\n`, `n ${i}`, 1_700_080_000 + i)
+  }
+  const good = git(repoDir, 'rev-parse', 'HEAD~5')
+  await page.locator('aside').getByText('All commits', { exact: true }).click()
+  await page.getByText('n 6', { exact: true }).first().click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Bisect from here (this commit is bad)…' }).click()
+  const dlg = page.getByRole('dialog')
+  await dlg.locator('input').first().fill(good)
+  await dlg.getByRole('button', { name: 'Start bisect' }).click()
+  await expect(page.getByText(/^Bisecting · testing/)).toBeVisible()
+  await shot('20-bisect')
+
+  const banner = page
+    .locator('div', { has: page.getByRole('button', { name: 'End bisect' }) })
+    .last()
+  for (let step = 0; step < 6; step++) {
+    if (await page.locator('span', { hasText: /^First bad commit:/ }).isVisible()) break
+    const before = git(repoDir, 'rev-parse', 'HEAD')
+    const broken = readFileSync(join(repoDir, 'n.txt'), 'utf8').startsWith('broken')
+    await banner.getByRole('button', { name: broken ? 'Bad' : 'Good', exact: true }).click()
+    await expect
+      .poll(
+        () =>
+          git(repoDir, 'rev-parse', 'HEAD') !== before ||
+          readFileSync(join(repoDir, '.git', 'BISECT_LOG'), 'utf8').includes('first bad commit')
+      )
+      .toBe(true)
+  }
+  await expect(page.locator('span', { hasText: /^First bad commit: \w+ n 4$/ })).toBeVisible()
+  await page.getByRole('button', { name: 'End bisect' }).click()
+  await expect(page.getByText('Bisect ended; back where you started')).toBeVisible()
+  expect(git(repoDir, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('main')
+})
+
+test('creates and removes a worktree for a branch', async () => {
+  await page.locator('aside').getByText('topic', { exact: true }).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Check out in a new worktree…' }).click()
+  await expect(page.getByText('Worktree for topic created')).toBeVisible()
+  const path = join(worktreesDir, 'demo-repo-topic')
+  expect(existsSync(join(path, 'topic.txt'))).toBe(true)
+  const row = page.locator('aside').getByTitle(new RegExp(`^${path}`))
+  await expect(row).toBeVisible()
+  await shot('21-worktrees')
+  await row.click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Remove…' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Remove' }).click()
+  await expect(page.getByText('Worktree removed')).toBeVisible()
+  expect(existsSync(path)).toBe(false)
+})
+
+test('adds a file pattern to .gitignore from the Changes view', async () => {
+  writeFileSync(join(repoDir, 'debug.log'), 'noise\n')
+  await page.locator('aside').getByText('Changes', { exact: true }).first().click()
+  await page.getByText('debug.log').first().click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Ignore…' }).click()
+  const dlg = page.getByRole('dialog')
+  await dlg.getByRole('combobox', { name: 'Pattern' }).click()
+  await page.getByRole('option', { name: '*.log' }).click()
+  await dlg.getByRole('button', { name: 'Ignore', exact: true }).click()
+  await expect(page.getByText('Added *.log to .gitignore')).toBeVisible()
+  expect(readFileSync(join(repoDir, '.gitignore'), 'utf8')).toContain('*.log\n')
+  expect(git(repoDir, 'status', '--porcelain', '--', 'debug.log')).toBe('')
 })

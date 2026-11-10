@@ -9,6 +9,7 @@ import {
   resetTo,
   revertCommit
 } from '../../lib/actions'
+import { bisectMenu } from '../../lib/everyday'
 import { short } from '../../lib/format'
 import { useUi } from '../../lib/store'
 import type { MenuEntry } from '../ui'
@@ -26,6 +27,11 @@ export function commitMenu(
       onSelect: () => editHistoryFrom(c.sha, parent, tipHint)
     },
     {
+      label: 'Edit contents of this commit…',
+      disabled: c.parents.length > 1,
+      onSelect: () => editHistoryFrom(c.sha, parent, tipHint, { [c.sha]: 'edit' })
+    },
+    {
       label: 'Push this commit to a remote branch…',
       onSelect: () => ui.openPush({ sourceKind: 'commit', source: c.sha })
     },
@@ -39,6 +45,20 @@ export function commitMenu(
       onSelect: () => void cherryPick(c.sha)
     },
     { label: 'Revert…', onSelect: () => void revertCommit(c.sha) },
+    bisectMenu(c.sha),
+    ...(currentBranch
+      ? [
+          {
+            label: `Merge this commit into ${currentBranch}…`,
+            onSelect: () =>
+              ui.openIntegrate({ kind: 'merge', source: c.sha, target: currentBranch })
+          },
+          {
+            label: `Rebase ${currentBranch} onto this commit…`,
+            onSelect: () => ui.openIntegrate({ kind: 'rebase', branch: currentBranch, onto: c.sha })
+          }
+        ]
+      : []),
     {
       label: `Reset ${currentBranch ?? 'HEAD'} to here…`,
       danger: true,

@@ -8,7 +8,10 @@ import { call } from '../../lib/api'
 import { cx, relative, short } from '../../lib/format'
 import { useCommitDetail, useRefs, useRepoId } from '../../lib/queries'
 import { useUi } from '../../lib/store'
-import { Badge, Button, Empty, Spinner } from '../ui'
+import { fileMenu } from '../../lib/everyday'
+import { rowIndent } from '../../lib/fileTree'
+import { FileList, FileListModeToggle } from '../FileList'
+import { Badge, Button, Empty, Spinner, WithContextMenu, type MenuEntry } from '../ui'
 import { DiffView } from './DiffView'
 
 const STATUS_COLOR: Record<string, string> = {
@@ -24,7 +27,10 @@ export function FileRow({
   f,
   active,
   onClick,
-  right
+  right,
+  menu,
+  depth = 0,
+  nameOnly
 }: {
   f: Pick<FileChange, 'path' | 'oldPath' | 'status'> & {
     additions?: number | null
@@ -33,15 +39,22 @@ export function FileRow({
   active: boolean
   onClick: () => void
   right?: React.ReactNode
+  /** Right-click menu (Blame, File history, …). */
+  menu?: () => MenuEntry[]
+  /** Nesting level in the folder view. */
+  depth?: number
+  /** Hide the folder part of the path (the folder view already shows it). */
+  nameOnly?: boolean
 }) {
   const name = f.path.split('/').pop()
-  const dir = f.path.slice(0, f.path.length - (name?.length ?? 0))
-  return (
+  const dir = nameOnly ? '' : f.path.slice(0, f.path.length - (name?.length ?? 0))
+  const row = (
     <div
       onClick={onClick}
       title={f.oldPath ? `${f.oldPath} → ${f.path}` : f.path}
+      style={{ paddingLeft: rowIndent(depth) }}
       className={cx(
-        'group flex h-[24px] cursor-default items-center gap-2 px-2',
+        'group flex h-[24px] cursor-default items-center gap-2 pr-2',
         active ? 'bg-accent-strong/30' : 'hover:bg-hover'
       )}
     >
@@ -55,13 +68,14 @@ export function FileRow({
       </span>
       <span className="min-w-0 flex-1 truncate">
         <span>{name}</span>
-        <span className="ml-1.5 text-xs text-faint">{dir}</span>
+        {dir && <span className="ml-1.5 text-xs text-faint">{dir}</span>}
       </span>
       {f.additions != null && <span className="mono text-[11px] text-ok">+{f.additions}</span>}
       {f.deletions != null && <span className="mono text-[11px] text-bad">−{f.deletions}</span>}
       {right}
     </div>
   )
+  return menu ? <WithContextMenu entries={menu}>{row}</WithContextMenu> : row
 }
 
 function Person({ label, who }: { label: string; who: Identity }) {
@@ -206,12 +220,24 @@ export function CommitDetails({ sha }: { sha: string }) {
           )}
         >
           {d.files.length} changed file{d.files.length === 1 ? '' : 's'}
-          {file !== null && <span className="ml-auto text-accent">show all</span>}
+          {file !== null && <span className="ml-2 text-accent">show all</span>}
+          <FileListModeToggle className="ml-auto" />
         </div>
         <div className="min-h-0 flex-1 overflow-auto">
-          {d.files.map((f) => (
-            <FileRow key={f.path} f={f} active={f.path === file} onClick={() => setFile(f.path)} />
-          ))}
+          <FileList
+            items={d.files}
+            pathOf={(f) => f.path}
+            renderFile={(f, row) => (
+              <FileRow
+                f={f}
+                active={f.path === file}
+                onClick={() => setFile(f.path)}
+                menu={() => fileMenu(f.path, { rev: d.sha })}
+                depth={row.depth}
+                nameOnly={row.tree}
+              />
+            )}
+          />
         </div>
       </div>
       <div className="min-w-0 flex-1">

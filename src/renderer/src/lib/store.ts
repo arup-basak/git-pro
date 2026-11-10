@@ -1,7 +1,25 @@
-import type { CommandLogEntry, MergeSource, PushSpec, RepoInfo, StashTarget } from '@shared/types'
+import type {
+  CommandLogEntry,
+  HistoryAction,
+  LineSelection,
+  MergeSource,
+  PushSpec,
+  RepoInfo,
+  RewriteResult,
+  StashTarget
+} from '@shared/types'
 import { create } from 'zustand'
 
-export type View = 'graph' | 'changes' | 'stashes' | 'history' | 'merge' | 'reflog' | 'backups'
+export type View =
+  'graph' | 'changes' | 'stashes' | 'history' | 'merge' | 'reflog' | 'backups' | 'file'
+
+/** The File view: blame or history of one file, optionally at an older revision. */
+export interface FileRequest {
+  path: string
+  tab: 'blame' | 'history'
+  /** Revision to blame at; null = the working tree. */
+  rev: string | null
+}
 
 export interface MergeRequest {
   source: MergeSource
@@ -12,12 +30,26 @@ export interface MergeRequest {
   back: View
 }
 
+/** What the New stash dialog opens with: everything, the staged part, files, or lines. */
+export interface StashDialogRequest {
+  paths?: string[]
+  staged?: boolean
+  selections?: LineSelection[]
+}
+
+/** Opens the Merge or Rebase-onto dialog, optionally prefilled. */
+export type IntegrateRequest =
+  | { kind: 'merge'; source?: string; target?: string }
+  | { kind: 'rebase'; branch?: string; onto?: string }
+
 export interface HistoryRequest {
   tip: string
   /** Exclusive base; null = from the root commit. */
   base: { sha: string | null } | { count: number }
   /** Commit to highlight when the editor opens. */
   focus?: string
+  /** Actions to preselect, by SHA (e.g. `edit` for "Edit contents of this commit…"). */
+  preset?: Record<string, HistoryAction>
   nonce: number
 }
 
@@ -29,9 +61,15 @@ interface UiState {
   graphRef: string | null
   history: HistoryRequest | null
   push: Partial<PushSpec> | null
+  integrate: IntegrateRequest | null
+  file: FileRequest | null
+  signingOpen: boolean
+  trackingOpen: boolean
+  /** A finished history rewrite to report (from the History editor or a final Continue). */
+  rewriteResult: RewriteResult | null
   logOpen: boolean
   stashSel: StashTarget | null
-  stashDialog: { paths?: string[]; staged?: boolean } | null
+  stashDialog: StashDialogRequest | null
   merge: MergeRequest | null
   settingsOpen: boolean
   shortcutsOpen: boolean
@@ -44,9 +82,15 @@ interface UiState {
   openHistory(req: Omit<HistoryRequest, 'nonce'>): void
   openPush(prefill: Partial<PushSpec>): void
   closePush(): void
+  showRewriteResult(r: RewriteResult | null): void
+  openFile(req: FileRequest): void
+  setSigningOpen(open: boolean): void
+  setTrackingOpen(open: boolean): void
+  openIntegrate(req: IntegrateRequest): void
+  closeIntegrate(): void
   toggleLog(open?: boolean): void
   selectStash(t: StashTarget | null): void
-  openStashDialog(opts: { paths?: string[]; staged?: boolean }): void
+  openStashDialog(opts: StashDialogRequest): void
   closeStashDialog(): void
   openMerge(req: Omit<MergeRequest, 'back'>): void
   closeMerge(): void
@@ -64,6 +108,11 @@ export const useUi = create<UiState>((set) => ({
   graphRef: null,
   history: null,
   push: null,
+  integrate: null,
+  rewriteResult: null,
+  file: null,
+  signingOpen: false,
+  trackingOpen: false,
   logOpen: false,
   stashSel: null,
   stashDialog: null,
@@ -80,6 +129,11 @@ export const useUi = create<UiState>((set) => ({
       history: null,
       stashSel: null,
       merge: null,
+      integrate: null,
+      rewriteResult: null,
+      file: null,
+      push: null,
+      trackingOpen: false,
       view: 'graph'
     }),
   setView: (view) => set({ view }),
@@ -88,6 +142,12 @@ export const useUi = create<UiState>((set) => ({
   openHistory: (req) => set({ history: { ...req, nonce: Date.now() }, view: 'history' }),
   openPush: (push) => set({ push }),
   closePush: () => set({ push: null }),
+  showRewriteResult: (rewriteResult) => set({ rewriteResult }),
+  openFile: (file) => set({ file, view: 'file' }),
+  setSigningOpen: (signingOpen) => set({ signingOpen }),
+  setTrackingOpen: (trackingOpen) => set({ trackingOpen }),
+  openIntegrate: (integrate) => set({ integrate }),
+  closeIntegrate: () => set({ integrate: null }),
   toggleLog: (open) => set((s) => ({ logOpen: open ?? !s.logOpen })),
   selectStash: (stashSel) => set({ stashSel }),
   openStashDialog: (stashDialog) => set({ stashDialog }),

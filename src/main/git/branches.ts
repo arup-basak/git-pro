@@ -1,6 +1,6 @@
 import { createBackup } from './backup'
 import { git } from './runner'
-import { assertBranchName, assertSafe, resolveCommit } from './util'
+import { assertBranchName, assertSafe, currentBranch, resolveCommit } from './util'
 
 export async function createBranch(
   cwd: string,
@@ -60,4 +60,22 @@ export async function setUpstream(
     assertSafe(upstream, 'upstream')
     await git(cwd, ['branch', `--set-upstream-to=${upstream}`, name], { write: true })
   }
+}
+
+/**
+ * Points a branch that is not checked out at another commit (`git branch -f`), after recording
+ * a backup of where it was. The checked-out branch is moved with reset instead.
+ */
+export async function moveBranch(cwd: string, name: string, rev: string): Promise<string> {
+  await assertBranchName(cwd, name)
+  if ((await currentBranch(cwd)) === name) {
+    throw new Error(`${name} is checked out; use Reset to move it`)
+  }
+  const sha = await resolveCommit(cwd, rev)
+  const old = await resolveCommit(cwd, `refs/heads/${name}`)
+  const backup = await createBackup(cwd, name, old, 'move')
+  await git(cwd, ['update-ref', '-m', 'git-pro: move branch', `refs/heads/${name}`, sha, old], {
+    write: true
+  })
+  return backup
 }

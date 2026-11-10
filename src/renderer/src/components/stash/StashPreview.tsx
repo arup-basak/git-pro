@@ -78,7 +78,7 @@ export function StashPreview({
 
   const doApply = async (pop: boolean): Promise<void> => {
     setBusy(true)
-    await applyStash(target, label, pop, restoreIndex)
+    await applyStash(target, label, pop, restoreIndex && !p!.onWorktree)
     setBusy(false)
   }
 
@@ -107,6 +107,14 @@ export function StashPreview({
               : ''}
             {conflicts.length && blocked.length ? ', ' : ''}
             {blocked.length ? `${blocked.length} blocked` : ''}
+          </span>
+        )}
+        {p.onWorktree && (
+          <span
+            className="text-muted"
+            title="The stash touches files you are still editing, so it is merged into those files on disk. Nothing is staged."
+          >
+            Applies on top of your uncommitted edits
           </span>
         )}
         <span className="text-faint">
@@ -180,9 +188,11 @@ export function StashPreview({
         <div className="min-w-0 flex-1">
           {sel && (sel.outcome === 'blocked' || sel.outcome === 'untracked-blocked') ? (
             <Empty>
-              {sel.outcome === 'blocked'
-                ? 'This file has uncommitted local changes, so git would refuse to apply the stash. Commit, stash or discard them first.'
-                : 'An untracked file with this name already exists; git would refuse to overwrite it. Move or delete it first.'}
+              {sel.outcome === 'untracked-blocked'
+                ? 'An untracked file with this name already exists; git would refuse to overwrite it. Move or delete it first.'
+                : p.onWorktree
+                  ? 'The stash changes the same lines as your uncommitted edits to this file (or the file already exists). Commit, stash or discard those edits first.'
+                  : 'This file has uncommitted local changes, so git would refuse to apply the stash. Commit, stash or discard them first.'}
             </Empty>
           ) : (
             <DiffView patch={diff.data ?? ''} loading={diff.isLoading} />
@@ -191,10 +201,15 @@ export function StashPreview({
       </div>
       <div className="flex h-11 shrink-0 items-center gap-3 border-t border-line px-3">
         <Checkbox
-          checked={restoreIndex}
+          checked={restoreIndex && !p.onWorktree}
+          disabled={p.onWorktree}
           onChange={setRestoreIndex}
           label="Restore staged state (--index)"
-          title="Also re-stage what was staged when the stash was made"
+          title={
+            p.onWorktree
+              ? 'Not available while the stash merges into files you are editing'
+              : 'Also re-stage what was staged when the stash was made'
+          }
         />
         {blocked.length > 0 && (
           <span className="text-xs text-bad">Resolve the blocked files before applying.</span>

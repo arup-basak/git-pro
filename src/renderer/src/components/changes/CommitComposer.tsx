@@ -7,6 +7,7 @@ import { run } from '../../lib/actions'
 import { call } from '../../lib/api'
 import { short } from '../../lib/format'
 import { useRefs, useRepoId } from '../../lib/queries'
+import { useUi } from '../../lib/store'
 import { Button, Checkbox, DateField } from '../ui'
 
 export function CommitComposer({ stagedCount }: { stagedCount: number }) {
@@ -22,6 +23,14 @@ export function CommitComposer({ stagedCount }: { stagedCount: number }) {
   const [signoff, setSignoff] = useState(false)
   const [noVerify, setNoVerify] = useState(false)
   const [allowEmpty, setAllowEmpty] = useState(false)
+  // null = follow commit.gpgsign from the git config.
+  const [sign, setSign] = useState<boolean | null>(null)
+  const signing = useQuery({
+    queryKey: ['repo', repoId, 'signing'],
+    queryFn: () => call('signing.get', repoId),
+    staleTime: 30_000
+  })
+  const signNow = sign ?? signing.data?.signCommits ?? false
   const [advanced, setAdvanced] = useState(false)
   const [customAuthor, setCustomAuthor] = useState(false)
   const [authorEdit, setAuthor] = useState<{ name: string; email: string } | null>(null)
@@ -62,6 +71,7 @@ export function CommitComposer({ stagedCount }: { stagedCount: number }) {
           signoff,
           noVerify,
           allowEmpty,
+          sign: sign ?? undefined,
           author: customAuthor ? author : undefined,
           authorDate: customDates ? authorDate : undefined,
           committerDate: customDates ? (sameDate ? authorDate : committerDate) : undefined
@@ -109,6 +119,23 @@ export function CommitComposer({ stagedCount }: { stagedCount: number }) {
             <Checkbox checked={signoff} onChange={setSignoff} label="Sign-off" />
             <Checkbox checked={noVerify} onChange={setNoVerify} label="Skip hooks" />
             <Checkbox checked={allowEmpty} onChange={setAllowEmpty} label="Allow empty" />
+            <Checkbox
+              checked={signNow}
+              onChange={setSign}
+              label="Sign"
+              title={
+                sign === null
+                  ? 'Follows commit.gpgsign from your git config'
+                  : 'Overrides commit.gpgsign for this commit'
+              }
+            />
+            <button
+              type="button"
+              className="text-xs text-accent hover:underline"
+              onClick={() => useUi.getState().setSigningOpen(true)}
+            >
+              Signing setup…
+            </button>
             <Checkbox checked={customAuthor} onChange={setCustomAuthor} label="Custom author" />
           </div>
           {customAuthor && (

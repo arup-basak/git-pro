@@ -5,7 +5,6 @@ import type {
   HistoryRange,
   HistoryRow,
   Person,
-  RewriteResult,
   RowEdit
 } from '@shared/types'
 import { useQuery } from '@tanstack/react-query'
@@ -26,7 +25,6 @@ import { invalidateRepo, showError, useRefs, useRepoId } from '../../lib/queries
 import { useUi, type HistoryRequest } from '../../lib/store'
 import { Button, Checkbox, DateField, Empty, Select, Spinner } from '../ui'
 import { formatOffset, parseOffset } from './dateTools'
-import { RewriteResultDialog } from './RewriteResultDialog'
 
 interface RowState {
   action: HistoryAction
@@ -87,16 +85,18 @@ function Loader({ req }: { req: HistoryRequest }) {
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-10 shrink-0 items-center gap-2 border-b border-line px-3 text-xs">
         <span className="text-muted">Tip</span>
-        <Select value={req.tip} onChange={(e) => reload(req.base, e.target.value)} className="w-48">
-          {!refs.data?.branches.some((b) => b.name === req.tip) && (
-            <option value={req.tip}>{req.tip}</option>
-          )}
-          {refs.data?.branches.map((b) => (
-            <option key={b.name} value={b.name}>
-              {b.name}
-            </option>
-          ))}
-        </Select>
+        <Select
+          value={req.tip}
+          onChange={(tip) => reload(req.base, tip)}
+          className="w-48"
+          aria-label="Tip"
+          options={[
+            ...(refs.data?.branches.some((b) => b.name === req.tip)
+              ? []
+              : [{ value: req.tip, label: req.tip }]),
+            ...(refs.data?.branches ?? []).map((b) => ({ value: b.name, label: b.name }))
+          ]}
+        />
         <span className="ml-2 text-muted">Range</span>
         {'sha' in req.base ? (
           <span className="mono rounded bg-line px-2 py-0.5">
@@ -157,7 +157,9 @@ function Editor({ range, req }: { range: HistoryRange; req: HistoryRequest }) {
   const original = useMemo(() => new Map(range.rows.map((r) => [r.sha, r])), [range])
   const [order, setOrder] = useState<string[]>(() => range.rows.map((r) => r.sha))
   const [state, setState] = useState<Record<string, RowState>>(() =>
-    Object.fromEntries(range.rows.map((r) => [r.sha, { action: 'pick' as HistoryAction }]))
+    Object.fromEntries(
+      range.rows.map((r) => [r.sha, { action: req.preset?.[r.sha] ?? ('pick' as HistoryAction) }])
+    )
   )
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [expanded, setExpanded] = useState<string | null>(req.focus ?? null)
@@ -171,7 +173,6 @@ function Editor({ range, req }: { range: HistoryRange; req: HistoryRequest }) {
   const anySigned = range.rows.some((r) => r.signed)
   const [resign, setResign] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState<RewriteResult | null>(null)
   const [dragSha, setDragSha] = useState<string | null>(null)
   const hasMerges = range.rows.some((r) => r.isMerge)
 
@@ -304,8 +305,14 @@ function Editor({ range, req }: { range: HistoryRange; req: HistoryRequest }) {
           duration: 10000
         })
         ui.setView('changes')
+      } else if (r.status === 'paused') {
+        toast.info('Stopped to edit a commit', {
+          description: 'Change its files and stage them, then Continue from the banner.',
+          duration: 10000
+        })
+        ui.setView('changes')
       } else {
-        setResult(r)
+        ui.showRewriteResult(r)
       }
     } catch (e) {
       showError(e, 'Rewrite failed')
@@ -397,6 +404,7 @@ function Editor({ range, req }: { range: HistoryRange; req: HistoryRequest }) {
                       'h-9 border-b border-line',
                       st.action === 'drop' && 'opacity-40 line-through',
                       (st.action === 'squash' || st.action === 'fixup') && 'bg-panel-2',
+                      st.action === 'edit' && 'bg-edit/[0.07]',
                       selected.has(sha) ? 'bg-accent-strong/15' : 'hover:bg-hover',
                       dragSha === sha && 'opacity-50',
                       req.focus === sha && 'outline outline-1 -outline-offset-1 outline-accent/60'
@@ -432,21 +440,24 @@ function Editor({ range, req }: { range: HistoryRange; req: HistoryRequest }) {
                       </span>
                     </td>
                     <td>
-                      <select
-                        className="field h-6 w-[80px] px-1 text-xs"
+                      <Select<HistoryAction>
+                        className="h-6 w-[80px] pl-1.5 text-xs"
                         disabled={hasMerges}
                         value={st.action}
-                        onChange={(ev) => patch(sha, { action: ev.target.value as HistoryAction })}
-                      >
-                        <option value="pick">pick</option>
-                        <option value="squash" disabled={idx === 0}>
-                          squash
-                        </option>
-                        <option value="fixup" disabled={idx === 0}>
-                          fixup
-                        </option>
-                        <option value="drop">drop</option>
-                      </select>
+                        aria-label="Action"
+                        onChange={(action) => patch(sha, { action })}
+                        options={[
+                          { value: 'pick', label: 'pick' },
+                          {
+                            value: 'edit',
+                            label: 'edit',
+                            title: 'Stop at this commit so you can change its files'
+                          },
+                          { value: 'squash', label: 'squash', disabled: idx === 0 },
+                          { value: 'fixup', label: 'fixup', disabled: idx === 0 },
+                          { value: 'drop', label: 'drop' }
+                        ]}
+                      />
                     </td>
                     <td className="mono text-faint">
                       {short(sha)}
@@ -599,7 +610,6 @@ function Editor({ range, req }: { range: HistoryRange; req: HistoryRequest }) {
               : 'Create branch'}
         </Button>
       </div>
-      {result && <RewriteResultDialog result={result} onClose={() => setResult(null)} />}
     </div>
   )
 }
@@ -723,15 +733,17 @@ function BulkTools({
     <div className="flex shrink-0 flex-wrap items-center gap-x-5 gap-y-2 border-b border-line bg-panel-2 px-3 py-2 text-xs">
       <div className="flex items-center gap-1.5">
         <span className="text-muted">Apply to</span>
-        <Select
+        <Select<DateTarget>
           value={target}
-          onChange={(e) => setTarget(e.target.value as DateTarget)}
+          onChange={setTarget}
           className="h-6 w-[150px] text-xs"
-        >
-          <option value="both">author + committer</option>
-          <option value="author">author dates</option>
-          <option value="committer">committer dates</option>
-        </Select>
+          aria-label="Apply to"
+          options={[
+            { value: 'both', label: 'author + committer' },
+            { value: 'author', label: 'author dates' },
+            { value: 'committer', label: 'committer dates' }
+          ]}
+        />
       </div>
       <div className="flex items-center gap-1.5">
         <input

@@ -11,7 +11,7 @@ import {
   tryResolve
 } from './util'
 
-async function assertRemote(cwd: string, remote: string): Promise<void> {
+export async function assertRemote(cwd: string, remote: string): Promise<void> {
   assertSafe(remote, 'remote')
   const remotes = await listRemotes(cwd)
   if (!remotes.some((r) => r.name === remote)) throw new Error(`Unknown remote "${remote}"`)
